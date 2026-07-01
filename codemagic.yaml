@@ -5,8 +5,6 @@ workflows:
 
     environment:
       flutter: stable
-      java: default
-      xcode: latest
 
     scripts:
       - name: Get dependencies
