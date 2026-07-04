@@ -234,11 +234,11 @@ class _LisaMainState extends State<LisaMain> {
           onPageChanged: _onPageChanged,
         );
       case 1:
-        return const NotesPage();
+        return NotesPage(onPageChanged: _onPageChanged);
       case 2:
-        return const HistoryPage();
+        return HistoryPage(onPageChanged: _onPageChanged);
       case 3:
-        return const SettingsPage();
+        return SettingsPage(onPageChanged: _onPageChanged);
       default:
         return const SizedBox.shrink();
     }
