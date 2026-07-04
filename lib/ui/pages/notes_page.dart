@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/lisa_bottom_nav.dart';
 
 class NotesPage extends StatefulWidget {
-  const NotesPage({super.key});
+  final Function(int) onPageChanged;
+
+  const NotesPage({
+    super.key,
+    required this.onPageChanged,
+  });
 
   @override
   State<NotesPage> createState() => _NotesPageState();
@@ -26,7 +32,6 @@ class _NotesPageState extends State<NotesPage> {
 
   Future<void> _saveNote(String note) async {
     if (note.trim().isEmpty) return;
-
     final prefs = await SharedPreferences.getInstance();
     _notes.insert(0, '${DateTime.now().toString().split('.')[0]} - $note');
     await prefs.setStringList('notes', _notes);
@@ -48,6 +53,7 @@ class _NotesPageState extends State<NotesPage> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0D0D2F),
         elevation: 0,
+        automaticallyImplyLeading: false,
         title: const Text(
           '📝 Notes',
           style: TextStyle(color: Colors.white),
@@ -65,7 +71,7 @@ class _NotesPageState extends State<NotesPage> {
                       controller: _noteController,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: 'Write a notes...',
+                        hintText: 'Write a note...',
                         hintStyle: const TextStyle(color: Colors.white54),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -105,13 +111,10 @@ class _NotesPageState extends State<NotesPage> {
             ),
             Expanded(
               child: _notes.isEmpty
-                  ? Center(
+                  ? const Center(
                       child: Text(
-                        'Empty',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 16,
-                        ),
+                        'কোনো নোট নেই',
+                        style: TextStyle(color: Colors.white54, fontSize: 16),
                       ),
                     )
                   : ListView.builder(
@@ -127,9 +130,7 @@ class _NotesPageState extends State<NotesPage> {
                             decoration: BoxDecoration(
                               color: const Color(0xFF111133),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: const Color(0xFF2A2A66),
-                              ),
+                              border: Border.all(color: const Color(0xFF2A2A66)),
                             ),
                             child: Row(
                               children: [
@@ -156,6 +157,10 @@ class _NotesPageState extends State<NotesPage> {
                         );
                       },
                     ),
+            ),
+            LisaBottomNav(
+              currentIndex: 1,
+              onTap: widget.onPageChanged,
             ),
           ],
         ),
