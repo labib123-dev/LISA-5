@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/lisa_bottom_nav.dart';
 
 class HistoryPage extends StatefulWidget {
-  const HistoryPage({super.key});
+  final Function(int) onPageChanged;
+
+  const HistoryPage({
+    super.key,
+    required this.onPageChanged,
+  });
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
@@ -65,6 +71,7 @@ class _HistoryPageState extends State<HistoryPage> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0D0D2F),
         elevation: 0,
+        automaticallyImplyLeading: false,
         title: const Text(
           '📊 History',
           style: TextStyle(color: Colors.white),
@@ -79,20 +86,20 @@ class _HistoryPageState extends State<HistoryPage> {
                   builder: (context) => AlertDialog(
                     backgroundColor: const Color(0xFF111133),
                     title: const Text(
-                      'Clear History?',
+                      'History মুছবেন?',
                       style: TextStyle(color: Colors.white),
                     ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('No'),
+                        child: const Text('না'),
                       ),
                       TextButton(
                         onPressed: () {
                           _clearHistory();
                           Navigator.pop(context);
                         },
-                        child: const Text('Yes'),
+                        child: const Text('হ্যাঁ'),
                       ),
                     ],
                   ),
@@ -118,12 +125,9 @@ class _HistoryPageState extends State<HistoryPage> {
                       ),
                       child: Column(
                         children: [
-                          Text(
-                            '✅ Success!',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                            ),
+                          const Text(
+                            '✅ সফল',
+                            style: TextStyle(color: Colors.white54, fontSize: 12),
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -149,12 +153,9 @@ class _HistoryPageState extends State<HistoryPage> {
                       ),
                       child: Column(
                         children: [
-                          Text(
-                            '❌ Faild',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                            ),
+                          const Text(
+                            '❌ ব্যর্থ',
+                            style: TextStyle(color: Colors.white54, fontSize: 12),
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -174,13 +175,10 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
             Expanded(
               child: _history.isEmpty
-                  ? Center(
+                  ? const Center(
                       child: Text(
-                        'Empty',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 16,
-                        ),
+                        'কোনো ইতিহাস নেই',
+                        style: TextStyle(color: Colors.white54, fontSize: 16),
                       ),
                     )
                   : ListView.builder(
@@ -256,6 +254,10 @@ class _HistoryPageState extends State<HistoryPage> {
                         );
                       },
                     ),
+            ),
+            LisaBottomNav(
+              currentIndex: 2,
+              onTap: widget.onPageChanged,
             ),
           ],
         ),
