@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/lisa_bottom_nav.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  final Function(int) onPageChanged;
+
+  const SettingsPage({
+    super.key,
+    required this.onPageChanged,
+  });
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -45,200 +51,192 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0D0D2F),
         elevation: 0,
+        automaticallyImplyLeading: false,
         title: const Text(
           '⚙️ Settings',
           style: TextStyle(color: Colors.white),
         ),
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+        child: Column(
           children: [
-            const Text(
-              'Effects',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            _SettingTile(
-              title: 'Vibration',
-              value: _vibrationEnabled,
-              onChanged: (value) async {
-                setState(() => _vibrationEnabled = value);
-                await _saveSettings();
-              },
-            ),
-            const SizedBox(height: 12),
-
-            _SettingTile(
-              title: 'Notifications',
-              value: _notificationEnabled,
-              onChanged: (value) async {
-                setState(() => _notificationEnabled = value);
-                await _saveSettings();
-              },
-            ),
-
-            const SizedBox(height: 32),
-
-            const Text(
-              'Voice',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF111133),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF2A2A66)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Speech Rate',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        '${(_ttsSpeed * 100).round()}%',
-                        style: const TextStyle(
-                          color: Color(0xFF6F7BFF),
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Slider(
-                    value: _ttsSpeed,
-                    min: 0.25,
-                    max: 1.0,
-                    activeColor: const Color(0xFF6F7BFF),
-                    inactiveColor: Colors.white24,
-                    onChanged: (value) {
-                      setState(() => _ttsSpeed = value);
-                    },
-                    onChangeEnd: (_) async {
-                      await _saveSettings();
-                    },
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF111133),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF2A2A66)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Voice Tone',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        '${_ttsPitch.toStringAsFixed(1)}x',
-                        style: const TextStyle(
-                          color: Color(0xFF6F7BFF),
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Slider(
-                    value: _ttsPitch,
-                    min: 0.5,
-                    max: 2.0,
-                    activeColor: const Color(0xFF6F7BFF),
-                    inactiveColor: Colors.white24,
-                    onChanged: (value) {
-                      setState(() => _ttsPitch = value);
-                    },
-                    onChangeEnd: (_) async {
-                      await _saveSettings();
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 32),
-
-            const Text(
-              'About',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF111133),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF2A2A66)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
                 children: [
                   const Text(
-                    'LISA - Personal Assistant',
+                    'Effects',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 14,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
+
+                  _SettingTile(
+                    title: 'Vibration',
+                    value: _vibrationEnabled,
+                    onChanged: (value) async {
+                      setState(() => _vibrationEnabled = value);
+                      await _saveSettings();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  _SettingTile(
+                    title: 'Notifications',
+                    value: _notificationEnabled,
+                    onChanged: (value) async {
+                      setState(() => _notificationEnabled = value);
+                      await _saveSettings();
+                    },
+                  ),
+
+                  const SizedBox(height: 32),
+
                   const Text(
-                    'Version: 1.0.0',
+                    'Voice',
                     style: TextStyle(
-                      color: Colors.white60,
-                      fontSize: 12,
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'An offline voice assistant, who control your device with your command.',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
+                  const SizedBox(height: 12),
+
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111133),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF2A2A66)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Speech Rate',
+                              style: TextStyle(color: Colors.white, fontSize: 14),
+                            ),
+                            Text(
+                              '${(_ttsSpeed * 100).round()}%',
+                              style: const TextStyle(
+                                color: Color(0xFF6F7BFF),
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Slider(
+                          value: _ttsSpeed,
+                          min: 0.25,
+                          max: 1.0,
+                          activeColor: const Color(0xFF6F7BFF),
+                          inactiveColor: Colors.white24,
+                          onChanged: (value) => setState(() => _ttsSpeed = value),
+                          onChangeEnd: (_) async => await _saveSettings(),
+                        ),
+                      ],
                     ),
                   ),
+                  const SizedBox(height: 12),
+
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111133),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF2A2A66)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Voice Tone',
+                              style: TextStyle(color: Colors.white, fontSize: 14),
+                            ),
+                            Text(
+                              '${_ttsPitch.toStringAsFixed(1)}x',
+                              style: const TextStyle(
+                                color: Color(0xFF6F7BFF),
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Slider(
+                          value: _ttsPitch,
+                          min: 0.5,
+                          max: 2.0,
+                          activeColor: const Color(0xFF6F7BFF),
+                          inactiveColor: Colors.white24,
+                          onChanged: (value) => setState(() => _ttsPitch = value),
+                          onChangeEnd: (_) async => await _saveSettings(),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  const Text(
+                    'About',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111133),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF2A2A66)),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'LISA - Personal Assistant',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Version: 1.0.0',
+                          style: TextStyle(color: Colors.white60, fontSize: 12),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'An offline voice assistant that controls your device with voice commands.',
+                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                 ],
               ),
+            ),
+            LisaBottomNav(
+              currentIndex: 3,
+              onTap: widget.onPageChanged,
             ),
           ],
         ),
@@ -272,10 +270,7 @@ class _SettingTile extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-            ),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
           ),
           Switch(
             value: value,
