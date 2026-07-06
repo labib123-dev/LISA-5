@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../core/speech_service.dart';
+import '../commands/flashlight.dart';
+import '../commands/phone_call.dart';
+import '../commands/message.dart';
+import '../commands/alarm.dart';
+import '../models/command_result.dart';
 
 class HomePageUpdated extends StatefulWidget {
   final bool isListening;
@@ -28,35 +33,47 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
   int selectedIndex = 0;
 
   Future<void> _handleQuickAction(String action) async {
-    if (action == 'call') {
+    if (action == 'torch') {
+      // সরাসরি FlashlightCommand call করা হচ্ছে
+      await FlashlightCommand.turnOn(widget.tts);
+
+    } else if (action == 'call') {
       await widget.tts.speak('কাকে কল করব? নম্বর বলুন।');
-      widget.speechService.startListening(
+      await widget.speechService.startListening(
         onResult: (text) async {
-          if (text.isNotEmpty) {
-            await widget.tts.speak('$text নম্বরে কল করা হচ্ছে।');
+          final number = RegExp(r'[\d]+').stringMatch(text) ?? '';
+          if (number.isNotEmpty) {
+            await PhoneCallCommand.callNumber(widget.tts, number);
+          } else {
+            await widget.tts.speak('নম্বর বুঝতে পারিনি।');
           }
         },
       );
+
     } else if (action == 'message') {
       await widget.tts.speak('কাকে মেসেজ পাঠাব? নম্বর বলুন।');
-      widget.speechService.startListening(
+      await widget.speechService.startListening(
         onResult: (text) async {
-          if (text.isNotEmpty) {
-            await widget.tts.speak('$text নম্বরে মেসেজ প্রস্তুত করা হচ্ছে।');
+          final number = RegExp(r'[\d]+').stringMatch(text) ?? '';
+          if (number.isNotEmpty) {
+            await MessageCommand.sendMessage(widget.tts, number, '');
+          } else {
+            await widget.tts.speak('নম্বর বুঝতে পারিনি।');
           }
         },
       );
+
     } else if (action == 'alarm') {
-      await widget.tts.speak('অ্যালার্ম সেট করতে সময় বলুন।');
-      widget.speechService.startListening(
+      await widget.tts.speak('কয়টায় অ্যালার্ম দেব? সময় বলুন।');
+      await widget.speechService.startListening(
         onResult: (text) async {
           if (text.isNotEmpty) {
-            await widget.tts.speak('$text এ অ্যালার্ম সেট করা হচ্ছে।');
+            await AlarmCommand.setAlarm(widget.tts, text, (_) {});
+          } else {
+            await widget.tts.speak('সময় বুঝতে পারিনি।');
           }
         },
       );
-    } else if (action == 'torch') {
-      await widget.tts.speak('টর্চ চালু করছি।');
     }
   }
 
@@ -69,6 +86,7 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
           child: Column(
             children: [
+              // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -101,24 +119,31 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
                     ),
                     child: const Center(
                       child: Text(
-                        'ABL',
+                        'LISA',
                         style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
+                          fontSize: 11,
                         ),
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 30),
+
+              const SizedBox(height: 24),
+
               Text(
                 widget.isListening
                     ? 'শুনছি...'
-                    : "Hello! I'am LISA. Always with you.",
+                    : 'হ্যালো! আমি LISA। সবসময় আপনার পাশে।',
                 style: const TextStyle(color: Colors.white70, fontSize: 15),
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 30),
+
+              const SizedBox(height: 24),
+
+              // Mic Button
               GestureDetector(
                 onTap: widget.onMicTap,
                 child: AnimatedContainer(
@@ -169,11 +194,15 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
                   ),
                 ),
               ),
-              const SizedBox(height: 14),
+
+              const SizedBox(height: 12),
+
               Text(
                 widget.isListening ? 'বলুন...' : 'ট্যাপ করে বলুন',
                 style: const TextStyle(color: Colors.white54, fontSize: 14),
               ),
+
+              // Spoken text display
               if (widget.spokenText.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -187,12 +216,18 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
                   ),
                   child: Text(
                     widget.spokenText,
-                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                 ),
               ],
-              const SizedBox(height: 24),
+
+              const SizedBox(height: 20),
+
+              // Quick Actions label
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -204,31 +239,51 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+
+              const SizedBox(height: 10),
+
+              // Quick Action Buttons
               Row(
                 children: [
                   Expanded(
-                    child: _actionButton('📞 কল করুন', () => _handleQuickAction('call')),
+                    child: _actionButton(
+                      '📞 কল করুন',
+                      () => _handleQuickAction('call'),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _actionButton('💬 মেসেজ', () => _handleQuickAction('message')),
+                    child: _actionButton(
+                      '💬 মেসেজ',
+                      () => _handleQuickAction('message'),
+                    ),
                   ),
                 ],
               ),
+
               const SizedBox(height: 12),
+
               Row(
                 children: [
                   Expanded(
-                    child: _actionButton('⏰ অ্যালার্ম', () => _handleQuickAction('alarm')),
+                    child: _actionButton(
+                      '⏰ অ্যালার্ম',
+                      () => _handleQuickAction('alarm'),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _actionButton('🔦 টর্চ', () => _handleQuickAction('torch')),
+                    child: _actionButton(
+                      '🔦 টর্চ',
+                      () => _handleQuickAction('torch'),
+                    ),
                   ),
                 ],
               ),
+
               const Spacer(),
+
+              // Bottom Navigation
               Container(
                 height: 68,
                 decoration: BoxDecoration(
