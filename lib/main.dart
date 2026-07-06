@@ -112,18 +112,14 @@ class _LisaMainState extends State<LisaMain> {
       Permission.notification,
     ].request();
 
-    final micGranted =
-        statuses[Permission.microphone]?.isGranted ?? false;
-
+    final micGranted = statuses[Permission.microphone]?.isGranted ?? false;
     if (!micGranted) {
-      debugPrint('Microphone permission not granted — voice command won\'t work.');
+      debugPrint('Microphone permission not granted.');
     }
   }
 
   Future<void> _toggleListening() async {
-    if (_router == null) {
-      return;
-    }
+    if (_router == null) return;
 
     if (_isListening) {
       await _speechService.stopListening();
@@ -187,16 +183,13 @@ class _LisaMainState extends State<LisaMain> {
     final prefs = await SharedPreferences.getInstance();
     final history = prefs.getStringList('command_history') ?? [];
     final timestamp = DateTime.now().toString().split('.')[0];
-    final entry = '${success ? 'success' : 'failed'}|$command|$message|$timestamp';
+    final entry =
+        '${success ? 'success' : 'failed'}|$command|$message|$timestamp';
     history.insert(0, entry);
     if (history.length > 100) history.removeAt(100);
     await prefs.setStringList('command_history', history);
   }
 
-  // Bottom nav থেকে page পরিবর্তনের জন্য — এর আগে main.dart এ এই
-  // callback টা ব্যবহারই হতো না, তাই Notes/History/Settings এ ক্লিক
-  // করলে কিছু হতো না। এখন HomePageUpdated.onPageChanged থেকে আসা
-  // index দিয়ে _currentPageIndex আপডেট হয়, যা _buildPage() switch করে।
   void _onPageChanged(int index) {
     setState(() => _currentPageIndex = index);
   }
@@ -214,10 +207,22 @@ class _LisaMainState extends State<LisaMain> {
       return const SplashScreen();
     }
 
-    return _OverlayHost(
-      key: _overlayKey,
-      child: Scaffold(
-        body: _buildPage(),
+    // PopScope দিয়ে Android back button/gesture handle করা হচ্ছে।
+    // Home page (index 0) এ থাকলে normally back করে app বন্ধ হবে।
+    // অন্য যেকোনো page (Notes/History/Settings) এ থাকলে back করলে
+    // app বন্ধ না হয়ে Home page এ ফিরে আসবে।
+    return PopScope(
+      canPop: _currentPageIndex == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _currentPageIndex != 0) {
+          setState(() => _currentPageIndex = 0);
+        }
+      },
+      child: _OverlayHost(
+        key: _overlayKey,
+        child: Scaffold(
+          body: _buildPage(),
+        ),
       ),
     );
   }
