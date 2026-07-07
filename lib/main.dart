@@ -57,6 +57,11 @@ class _LisaMainState extends State<LisaMain> {
   final GlobalKey<_OverlayHostState> _overlayKey =
       GlobalKey<_OverlayHostState>();
 
+  // showOverlay function যা HomePageUpdated এ pass হবে
+  void _showOverlay(Widget w) {
+    _overlayKey.currentState?.showOverlay(w);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -87,9 +92,7 @@ class _LisaMainState extends State<LisaMain> {
 
       _router = CommandRouter(
         tts: _ttsService.engine,
-        showOverlay: (widget) {
-          _overlayKey.currentState?.showOverlay(widget);
-        },
+        showOverlay: _showOverlay,
       );
 
       if (mounted) {
@@ -121,13 +124,15 @@ class _LisaMainState extends State<LisaMain> {
   Future<void> _toggleListening() async {
     if (_router == null) return;
 
+    // যদি এখন listening চলছে তাহলে বন্ধ করো
     if (_isListening) {
       await _speechService.stopListening();
       await _feedbackService.clearFeedback();
-      setState(() => _isListening = false);
+      if (mounted) setState(() => _isListening = false);
       return;
     }
 
+    // Microphone permission চেক
     final micStatus = await Permission.microphone.status;
     if (!micStatus.isGranted) {
       final result = await Permission.microphone.request();
@@ -137,18 +142,21 @@ class _LisaMainState extends State<LisaMain> {
       }
     }
 
+    // প্রথমে animation দেখাও তারপর initialize করো
+    // এতে user সাথে সাথে red animation দেখবে
+    if (mounted) setState(() => _isListening = true);
+
     try {
       final ready = await _speechService.initialize();
       if (!ready) {
         await _ttsService.speak('মাইক্রোফোন চালু করা যায়নি।');
+        if (mounted) setState(() => _isListening = false);
         return;
       }
 
-      setState(() => _isListening = true);
-
       await _speechService.startListening(
         onResult: (text) async {
-          setState(() => _spokenText = text);
+          if (mounted) setState(() => _spokenText = text);
 
           if (WakeWord.detected(text)) {
             await _feedbackService.onListeningStarted();
@@ -164,14 +172,14 @@ class _LisaMainState extends State<LisaMain> {
               await _feedbackService.onCommandFailed(result.message);
             }
 
-            setState(() => _isListening = false);
+            if (mounted) setState(() => _isListening = false);
             await _speechService.stopListening();
           }
         },
       );
     } catch (e) {
       debugPrint('Listening error: $e');
-      setState(() => _isListening = false);
+      if (mounted) setState(() => _isListening = false);
     }
   }
 
@@ -191,7 +199,7 @@ class _LisaMainState extends State<LisaMain> {
   }
 
   void _onPageChanged(int index) {
-    setState(() => _currentPageIndex = index);
+    if (mounted) setState(() => _currentPageIndex = index);
   }
 
   @override
@@ -207,10 +215,6 @@ class _LisaMainState extends State<LisaMain> {
       return const SplashScreen();
     }
 
-    // PopScope দিয়ে Android back button/gesture handle করা হচ্ছে।
-    // Home page (index 0) এ থাকলে normally back করে app বন্ধ হবে।
-    // অন্য যেকোনো page (Notes/History/Settings) এ থাকলে back করলে
-    // app বন্ধ না হয়ে Home page এ ফিরে আসবে।
     return PopScope(
       canPop: _currentPageIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
@@ -237,6 +241,7 @@ class _LisaMainState extends State<LisaMain> {
           tts: _ttsService.engine,
           speechService: _speechService,
           onPageChanged: _onPageChanged,
+          showOverlay: _showOverlay,
         );
       case 1:
         return NotesPage(onPageChanged: _onPageChanged);
@@ -252,7 +257,6 @@ class _LisaMainState extends State<LisaMain> {
 
 class _OverlayHost extends StatefulWidget {
   final Widget child;
-
   const _OverlayHost({super.key, required this.child});
 
   @override
