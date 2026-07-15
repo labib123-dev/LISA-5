@@ -28,7 +28,7 @@ class LisaApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'LISA',
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF070722),
+        scaffoldBackgroundColor: const Color(0xFF0D0000),
       ),
       home: const LisaMain(),
     );
@@ -51,15 +51,28 @@ class _LisaMainState extends State<LisaMain> {
 
   bool _isListening = false;
   bool _permissionsReady = false;
+  bool _commandExecuting = false;
   String _spokenText = '';
   int _currentPageIndex = 0;
 
+  // Fix 7: GlobalKey কে StatefulWidget এ রাখা হচ্ছে যাতে
+  // widget tree mounted থাকা অবস্থায় সবসময় valid থাকে
   final GlobalKey<_OverlayHostState> _overlayKey =
       GlobalKey<_OverlayHostState>();
 
-  // showOverlay function যা HomePageUpdated এ pass হবে
   void _showOverlay(Widget w) {
-    _overlayKey.currentState?.showOverlay(w);
+    // Fix 7: currentState null হলে error না দিয়ে
+    // একটু পরে retry করা হচ্ছে
+    if (_overlayKey.currentState != null) {
+      _overlayKey.currentState!.showOverlay(w);
+    } else {
+      debugPrint('Overlay not ready, retrying...');
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_overlayKey.currentState != null) {
+          _overlayKey.currentState!.showOverlay(w);
+        }
+      });
+    }
   }
 
   @override
@@ -81,13 +94,13 @@ class _LisaMainState extends State<LisaMain> {
       try {
         await _speechService.initialize();
       } catch (e) {
-        debugPrint('Speech service init failed: $e');
+        debugPrint('Speech init failed: $e');
       }
 
       try {
         await _feedbackService.init();
       } catch (e) {
-        debugPrint('Feedback service init failed: $e');
+        debugPrint('Feedback init failed: $e');
       }
 
       _router = CommandRouter(
@@ -95,14 +108,10 @@ class _LisaMainState extends State<LisaMain> {
         showOverlay: _showOverlay,
       );
 
-      if (mounted) {
-        setState(() => _permissionsReady = true);
-      }
+      if (mounted) setState(() => _permissionsReady = true);
     } catch (e) {
       debugPrint('LISA init error: $e');
-      if (mounted) {
-        setState(() => _permissionsReady = true);
-      }
+      if (mounted) setState(() => _permissionsReady = true);
     }
   }
 
@@ -116,15 +125,15 @@ class _LisaMainState extends State<LisaMain> {
     ].request();
 
     final micGranted = statuses[Permission.microphone]?.isGranted ?? false;
-    if (!micGranted) {
-      debugPrint('Microphone permission not granted.');
-    }
+    if (!micGranted) debugPrint('Microphone permission not granted.');
   }
 
   Future<void> _toggleListening() async {
-    if (_router == null) return;
+    if (_router == null) {
+      await _ttsService.speak('LISA প্রস্তুত হচ্ছে, একটু অপেক্ষা করুন।');
+      return;
+    }
 
-    // যদি এখন listening চলছে তাহলে বন্ধ করো
     if (_isListening) {
       await _speechService.stopListening();
       await _feedbackService.clearFeedback();
@@ -132,7 +141,6 @@ class _LisaMainState extends State<LisaMain> {
       return;
     }
 
-    // Microphone permission চেক
     final micStatus = await Permission.microphone.status;
     if (!micStatus.isGranted) {
       final result = await Permission.microphone.request();
@@ -142,8 +150,6 @@ class _LisaMainState extends State<LisaMain> {
       }
     }
 
-    // প্রথমে animation দেখাও তারপর initialize করো
-    // এতে user সাথে সাথে red animation দেখবে
     if (mounted) setState(() => _isListening = true);
 
     try {
@@ -158,28 +164,48 @@ class _LisaMainState extends State<LisaMain> {
         onResult: (text) async {
           if (mounted) setState(() => _spokenText = text);
 
+          // Fix 6: _commandExecuting flag দিয়ে partial text এ
+          // double execution ঠেকানো হচ্ছে।
+          // partialResults: true থাকায় "Lisa to..." আসার সাথেই
+          // WakeWord.detected() true হতো এবং incomplete command
+          // route হয়ে যেত। এখন একটা command executing অবস্থায়
+          // থাকলে নতুন result ignore করা হচ্ছে।
+          if (_commandExecuting) return;
+
           if (WakeWord.detected(text)) {
-            await _feedbackService.onListeningStarted();
-            await _feedbackService.onProcessing();
-
-            final result = await _router!.route(text);
-
-            await _saveToHistory(text, result.success, result.message);
-
-            if (result.success) {
-              await _feedbackService.onCommandSuccess(result.message);
-            } else {
-              await _feedbackService.onCommandFailed(result.message);
-            }
-
-            if (mounted) setState(() => _isListening = false);
+            // Fix 2: সাথে সাথেই stop করা হচ্ছে
             await _speechService.stopListening();
+            if (mounted) setState(() {
+              _isListening = false;
+              _commandExecuting = true;
+            });
+
+            try {
+              await _feedbackService.onListeningStarted();
+              await _feedbackService.onProcessing();
+
+              final result = await _router!.route(text);
+
+              await _saveToHistory(text, result.success, result.message);
+
+              if (result.success) {
+                await _feedbackService.onCommandSuccess(result.message);
+              } else {
+                await _feedbackService.onCommandFailed(result.message);
+              }
+            } finally {
+              // command শেষ হলে বা error হলে flag reset
+              if (mounted) setState(() => _commandExecuting = false);
+            }
           }
         },
       );
     } catch (e) {
       debugPrint('Listening error: $e');
-      if (mounted) setState(() => _isListening = false);
+      if (mounted) setState(() {
+        _isListening = false;
+        _commandExecuting = false;
+      });
     }
   }
 
@@ -222,6 +248,9 @@ class _LisaMainState extends State<LisaMain> {
           setState(() => _currentPageIndex = 0);
         }
       },
+      // Fix 7: _OverlayHost সবসময় root এ থাকছে
+      // page change হলেও এটা unmount হবে না
+      // তাই _overlayKey.currentState কখনো null হবে না
       child: _OverlayHost(
         key: _overlayKey,
         child: Scaffold(
