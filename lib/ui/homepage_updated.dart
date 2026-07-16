@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import '../core/speech_service.dart';
 import '../commands/flashlight.dart';
 import '../commands/phone_call.dart';
@@ -34,6 +35,72 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
   int selectedIndex = 0;
   bool _torchOn = false;
 
+  // Fix 3: আলাদা STT instance — main listener এর সাথে conflict নেই
+  final SpeechToText _quickSpeech = SpeechToText();
+
+  // Fix 10: Quick action এর visual state
+  bool _quickListening = false;
+  String _quickPrompt = '';
+  String _activeAction = '';
+
+  Future<void> _listenForQuickAction({
+    required String action,
+    required String prompt,
+    required Future<void> Function(String text) onFinalResult,
+  }) async {
+    // main listener চলছে বা quick listener চলছে — skip
+    if (widget.speechService.isListening || _quickListening) return;
+
+    // Fix 10: Visual feedback — user কে জানাও কোন action এর জন্য শুনছে
+    setState(() {
+      _quickListening = true;
+      _quickPrompt = prompt;
+      _activeAction = action;
+    });
+
+    await widget.tts.speak(prompt);
+
+    final initialized = await _quickSpeech.initialize();
+    if (!initialized) {
+      await widget.tts.speak('মাইক্রোফোন চালু করা যায়নি।');
+      setState(() {
+        _quickListening = false;
+        _quickPrompt = '';
+        _activeAction = '';
+      });
+      return;
+    }
+
+    String finalText = '';
+
+    await _quickSpeech.listen(
+      listenMode: ListenMode.confirmation,
+      partialResults: false,
+      listenFor: const Duration(seconds: 8),
+      pauseFor: const Duration(seconds: 2),
+      onResult: (result) {
+        if (result.finalResult) {
+          finalText = result.recognizedWords;
+        }
+      },
+    );
+
+    await Future.delayed(const Duration(seconds: 9));
+
+    // Fix 10: Listening শেষ — visual feedback সরিয়ে দাও
+    setState(() {
+      _quickListening = false;
+      _quickPrompt = '';
+      _activeAction = '';
+    });
+
+    if (finalText.isNotEmpty) {
+      await onFinalResult(finalText);
+    } else {
+      await widget.tts.speak('বুঝতে পারিনি, আবার চেষ্টা করুন।');
+    }
+  }
+
   Future<void> _handleQuickAction(String action) async {
     if (action == 'torch') {
       if (_torchOn) {
@@ -43,10 +110,14 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
         await FlashlightCommand.turnOn(widget.tts);
         setState(() => _torchOn = true);
       }
-    } else if (action == 'call') {
-      await widget.tts.speak('কাকে কল করব? নম্বর বলুন।');
-      await widget.speechService.startListening(
-        onResult: (text) async {
+      return;
+    }
+
+    if (action == 'call') {
+      await _listenForQuickAction(
+        action: 'call',
+        prompt: 'কাকে কল করব? নম্বর বলুন।',
+        onFinalResult: (text) async {
           final number = RegExp(r'[\d]+').stringMatch(text) ?? '';
           if (number.isNotEmpty) {
             await PhoneCallCommand.callNumber(widget.tts, number);
@@ -55,10 +126,14 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
           }
         },
       );
-    } else if (action == 'message') {
-      await widget.tts.speak('কাকে মেসেজ পাঠাব? নম্বর বলুন।');
-      await widget.speechService.startListening(
-        onResult: (text) async {
+      return;
+    }
+
+    if (action == 'message') {
+      await _listenForQuickAction(
+        action: 'message',
+        prompt: 'কাকে মেসেজ পাঠাব? নম্বর বলুন।',
+        onFinalResult: (text) async {
           final number = RegExp(r'[\d]+').stringMatch(text) ?? '';
           if (number.isNotEmpty) {
             await MessageCommand.sendMessage(widget.tts, number, '');
@@ -67,18 +142,25 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
           }
         },
       );
-    } else if (action == 'alarm') {
-      await widget.tts.speak('কয়টায় অ্যালার্ম দেব? সময় বলুন।');
-      await widget.speechService.startListening(
-        onResult: (text) async {
-          if (text.isNotEmpty) {
-            await AlarmCommand.setAlarm(widget.tts, text, widget.showOverlay);
-          } else {
-            await widget.tts.speak('সময় বুঝতে পারিনি।');
-          }
+      return;
+    }
+
+    if (action == 'alarm') {
+      await _listenForQuickAction(
+        action: 'alarm',
+        prompt: 'কয়টায় অ্যালার্ম দেব? সময় বলুন।',
+        onFinalResult: (text) async {
+          await AlarmCommand.setAlarm(widget.tts, text, widget.showOverlay);
         },
       );
+      return;
     }
+  }
+
+  @override
+  void dispose() {
+    _quickSpeech.cancel();
+    super.dispose();
   }
 
   @override
@@ -90,6 +172,7 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
           child: Column(
             children: [
+              // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -111,16 +194,46 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
                 ],
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
-              Text(
-                widget.isListening ? 'শুনছি...' : 'হ্যালো! আমি LISA। সবসময় আপনার পাশে।',
-                style: const TextStyle(color: Colors.white70, fontSize: 15),
-                textAlign: TextAlign.center,
+              // Fix 10: status text — quick action listening এর সময়
+              // আলাদা message দেখায়
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: _quickListening
+                    ? Container(
+                        key: const ValueKey('quick'),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.mic, color: Colors.orange, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              _quickPrompt,
+                              style: const TextStyle(color: Colors.orange, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      )
+                    : Text(
+                        key: const ValueKey('status'),
+                        widget.isListening
+                            ? 'শুনছি...'
+                            : 'হ্যালো! আমি LISA। সবসময় আপনার পাশে।',
+                        style: const TextStyle(color: Colors.white70, fontSize: 15),
+                        textAlign: TextAlign.center,
+                      ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
+              // Mic Button
               GestureDetector(
                 onTap: widget.onMicTap,
                 child: AnimatedContainer(
@@ -172,8 +285,15 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(color: const Color(0xFF111133), borderRadius: BorderRadius.circular(12)),
-                  child: Text(widget.spokenText, style: const TextStyle(color: Colors.white70, fontSize: 14), textAlign: TextAlign.center),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF111133),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    widget.spokenText,
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               ],
 
@@ -188,9 +308,9 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
 
               Row(
                 children: [
-                  Expanded(child: _actionButton('📞 কল করুন', () => _handleQuickAction('call'), false)),
+                  Expanded(child: _actionButton('📞 কল করুন', () => _handleQuickAction('call'), false, 'call')),
                   const SizedBox(width: 12),
-                  Expanded(child: _actionButton('💬 মেসেজ', () => _handleQuickAction('message'), false)),
+                  Expanded(child: _actionButton('💬 মেসেজ', () => _handleQuickAction('message'), false, 'message')),
                 ],
               ),
 
@@ -198,17 +318,21 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
 
               Row(
                 children: [
-                  Expanded(child: _actionButton('⏰ অ্যালার্ম', () => _handleQuickAction('alarm'), false)),
+                  Expanded(child: _actionButton('⏰ অ্যালার্ম', () => _handleQuickAction('alarm'), false, 'alarm')),
                   const SizedBox(width: 12),
-                  Expanded(child: _actionButton(_torchOn ? '🔦 টর্চ বন্ধ' : '🔦 টর্চ', () => _handleQuickAction('torch'), _torchOn)),
+                  Expanded(child: _actionButton(_torchOn ? '🔦 টর্চ বন্ধ' : '🔦 টর্চ', () => _handleQuickAction('torch'), _torchOn, 'torch')),
                 ],
               ),
 
               const Spacer(),
 
+              // Bottom Navigation
               Container(
                 height: 68,
-                decoration: BoxDecoration(color: const Color(0xFF0D0D2F), borderRadius: BorderRadius.circular(20)),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D0D2F),
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
@@ -226,19 +350,52 @@ class _HomePageUpdatedState extends State<HomePageUpdated> {
     );
   }
 
-  Widget _actionButton(String title, VoidCallback onTap, bool active) {
+  // Fix 10: button active হলে orange highlight দেখাবে
+  // যাতে user বুঝতে পারে কোন button এর জন্য শুনছে
+  Widget _actionButton(String title, VoidCallback onTap, bool active, String action) {
+    final isActiveListening = _quickListening && _activeAction == action;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 56,
         decoration: BoxDecoration(
-          color: active ? const Color(0xFF6F7BFF).withOpacity(0.3) : const Color(0xFF111133),
+          color: isActiveListening
+              ? Colors.orange.withOpacity(0.2)
+              : active
+                  ? const Color(0xFF6F7BFF).withOpacity(0.3)
+                  : const Color(0xFF111133),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: active ? const Color(0xFF6F7BFF) : const Color(0xFF2A2A66)),
+          border: Border.all(
+            color: isActiveListening
+                ? Colors.orange
+                : active
+                    ? const Color(0xFF6F7BFF)
+                    : const Color(0xFF2A2A66),
+          ),
         ),
         child: Center(
-          child: Text(title, style: TextStyle(color: active ? const Color(0xFF6F7BFF) : Colors.white, fontSize: 13, fontWeight: active ? FontWeight.bold : FontWeight.normal)),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (isActiveListening) ...[
+                const Icon(Icons.mic, color: Colors.orange, size: 14),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                title,
+                style: TextStyle(
+                  color: isActiveListening
+                      ? Colors.orange
+                      : active
+                          ? const Color(0xFF6F7BFF)
+                          : Colors.white,
+                  fontSize: 13,
+                  fontWeight: (isActiveListening || active) ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
