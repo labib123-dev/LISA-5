@@ -1,19 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
-
-import 'router/command_router.dart';
-import 'ui/homepage_updated.dart';
-import 'ui/pages/notes_page.dart';
-import 'ui/pages/history_page.dart';
-import 'ui/pages/settings_page.dart';
-import 'ui/overly_manager.dart';
-import 'ui/splash_screen.dart';
-import 'core/tts_service.dart';
-import 'core/speech_service.dart';
-import 'core/wake_word.dart';
-import 'core/feedback_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/feedback_service.dart';
+import 'core/speech_service.dart';
+import 'core/tts_service.dart';
+import 'core/wake_word.dart';
+import 'router/command_router.dart';
+import 'ui/homepage_updated.dart';
+import 'ui/overly_manager.dart';
+import 'ui/pages/history_page.dart';
+import 'ui/pages/settings_page.dart';
+import 'ui/splash_screen.dart';
+
+/// পর্ব ২ — ফাইল ৩/৫
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const LisaApp());
@@ -49,28 +51,31 @@ class _LisaMainState extends State<LisaMain> {
 
   CommandRouter? _router;
 
-  bool _isListening = false;
+  // ══ ভয়েস ফ্লো সেটিংস (এখানেই বদলাবে) ═══════════
+  static const int _firstListenSeconds = 8; // ১ম ধাপ কত সেকেন্ড শুনবে
+  static const int _secondListenSeconds = 5; // "বলুন, শুনছি"র পর ৫ সেকেন্ড
+  static const bool requireWakeWord = true; // false করলে লিসা ছাড়াও চলবে
+
+  // ══ State ═════════════════════════════════════
   bool _permissionsReady = false;
+  bool _isListening = false;
+  bool _expectWakeWord = true; // এই ধাপে লিসা বাধ্যতামূলক?
+  bool _askedAgain = false; // "বলুন, শুনছি" একবারই বলবে
   bool _commandExecuting = false;
-  String _spokenText = '';
+  String _spokenText = ''; // যা শুনেছে / স্ক্রিনে নির্দেশনা
   int _currentPageIndex = 0;
 
-  // Fix 7: GlobalKey কে StatefulWidget এ রাখা হচ্ছে যাতে
-  // widget tree mounted থাকা অবস্থায় সবসময় valid থাকে
+  Timer? _listenTimer;
+
   final GlobalKey<_OverlayHostState> _overlayKey =
       GlobalKey<_OverlayHostState>();
 
   void _showOverlay(Widget w) {
-    // Fix 7: currentState null হলে error না দিয়ে
-    // একটু পরে retry করা হচ্ছে
     if (_overlayKey.currentState != null) {
       _overlayKey.currentState!.showOverlay(w);
     } else {
-      debugPrint('Overlay not ready, retrying...');
       Future.delayed(const Duration(milliseconds: 300), () {
-        if (_overlayKey.currentState != null) {
-          _overlayKey.currentState!.showOverlay(w);
-        }
+        _overlayKey.currentState?.showOverlay(w);
       });
     }
   }
@@ -108,6 +113,12 @@ class _LisaMainState extends State<LisaMain> {
         showOverlay: _showOverlay,
       );
 
+      // পর্ব ২ — ফাইল ৪/৫ (first_run_wizard.dart) লেখার সময়
+      // ঠিক এখানে setup চেক যোগ হবে:
+      //   final prefs = await SharedPreferences.getInstance();
+      //   final done = prefs.getBool('setup_done') ?? false;
+      //   if (!done) → FirstRunWizard
+
       if (mounted) setState(() => _permissionsReady = true);
     } catch (e) {
       debugPrint('LISA init error: $e');
@@ -118,9 +129,6 @@ class _LisaMainState extends State<LisaMain> {
   Future<void> _requestPermissions() async {
     final statuses = await [
       Permission.microphone,
-      Permission.camera,
-      Permission.phone,
-      Permission.sms,
       Permission.notification,
     ].request();
 
@@ -128,16 +136,12 @@ class _LisaMainState extends State<LisaMain> {
     if (!micGranted) debugPrint('Microphone permission not granted.');
   }
 
-  Future<void> _toggleListening() async {
-    if (_router == null) {
-      await _ttsService.speak('LISA প্রস্তুত হচ্ছে, একটু অপেক্ষা করুন।');
-      return;
-    }
+  // ══ মাইক বাটন ═════════════════════════════════
+  Future<void> _onMicTap() async {
+    if (_commandExecuting) return;
 
     if (_isListening) {
-      await _speechService.stopListening();
-      await _feedbackService.clearFeedback();
-      if (mounted) setState(() => _isListening = false);
+      await _stopListening('থামানো হলো। ট্যাপ করে আবার বলুন।');
       return;
     }
 
@@ -145,83 +149,218 @@ class _LisaMainState extends State<LisaMain> {
     if (!micStatus.isGranted) {
       final result = await Permission.microphone.request();
       if (!result.isGranted) {
-        await _ttsService.speak('মাইক্রোফোন অনুমতি ছাড়া শোনা সম্ভব নয়।');
+        await _ttsService.speak('মাইক্রোফোনের অনুমতি ছাড়া শোনা সম্ভব নয়।');
         return;
       }
     }
 
-    if (mounted) setState(() => _isListening = true);
+    _askedAgain = false;
+    await _startListening(
+      seconds: _firstListenSeconds,
+      expectWakeWord: requireWakeWord,
+    );
+  }
+
+  // ══ শোনা শুরু ═════════════════════════════════
+  Future<void> _startListening({
+    required int seconds,
+    required bool expectWakeWord,
+  }) async {
+    if (_commandExecuting) return;
+
+    final ready = await _speechService.initialize();
+    if (!ready) {
+      await _ttsService.speak('মাইক্রোফোন চালু করা যায়নি।');
+      if (mounted) setState(() => _isListening = false);
+      return;
+    }
+
+    // LISA নিজের কথা যেন নিজে না শোনে
+    await _ttsService.stop();
+
+    if (mounted) {
+      setState(() {
+        _isListening = true;
+        _expectWakeWord = expectWakeWord;
+        _spokenText = '';
+      });
+    }
+
+    await _feedbackService.onListeningStarted();
+
+    // STT নিজে থামলেও নির্দিষ্ট সময়ে জোর করে থামানোর জন্য
+    _listenTimer?.cancel();
+    _listenTimer = Timer(
+      Duration(milliseconds: seconds * 1000 + 800),
+      _onWindowExpired,
+    );
 
     try {
-      final ready = await _speechService.initialize();
-      if (!ready) {
-        await _ttsService.speak('মাইক্রোফোন চালু করা যায়নি।');
-        if (mounted) setState(() => _isListening = false);
-        return;
-      }
-
       await _speechService.startListening(
-        onResult: (text) async {
-          if (mounted) setState(() => _spokenText = text);
-
-          // Fix 6: _commandExecuting flag দিয়ে partial text এ
-          // double execution ঠেকানো হচ্ছে।
-          // partialResults: true থাকায় "Lisa to..." আসার সাথেই
-          // WakeWord.detected() true হতো এবং incomplete command
-          // route হয়ে যেত। এখন একটা command executing অবস্থায়
-          // থাকলে নতুন result ignore করা হচ্ছে।
-          if (_commandExecuting) return;
-
-          if (WakeWord.detected(text)) {
-            // Fix 2: সাথে সাথেই stop করা হচ্ছে
-            await _speechService.stopListening();
-            if (mounted) setState(() {
-              _isListening = false;
-              _commandExecuting = true;
-            });
-
-            try {
-              await _feedbackService.onListeningStarted();
-              await _feedbackService.onProcessing();
-
-              final result = await _router!.route(text);
-
-              await _saveToHistory(text, result.success, result.message);
-
-              if (result.success) {
-                await _feedbackService.onCommandSuccess(result.message);
-              } else {
-                await _feedbackService.onCommandFailed(result.message);
-              }
-            } finally {
-              // command শেষ হলে বা error হলে flag reset
-              if (mounted) setState(() => _commandExecuting = false);
-            }
-          }
-        },
+        listenFor: Duration(seconds: seconds),
+        pauseFor: const Duration(seconds: 2),
+        onResult: _handleSpeechResult,
       );
     } catch (e) {
-      debugPrint('Listening error: $e');
-      if (mounted) setState(() {
+      debugPrint('Listen error: $e');
+      _listenTimer?.cancel();
+      if (mounted) setState(() => _isListening = false);
+    }
+  }
+
+  // ══ STT ফলাফল ═════════════════════════════════
+  Future<void> _handleSpeechResult(String text, bool isFinal) async {
+    if (!mounted) return;
+
+    final clean = text.trim();
+
+    // স্ক্রিনে সাথে সাথে দেখাও — partial হলেও
+    if (clean.isNotEmpty && _isListening) {
+      setState(() => _spokenText = clean);
+    }
+
+    if (!isFinal) return; // partial হলে কিছুই করব না (মূল বাগ ফিক্স)
+    if (_commandExecuting) return;
+
+    _listenTimer?.cancel();
+    _listenTimer = null;
+
+    await _handleFinalSpeech(clean);
+  }
+
+  Future<void> _handleFinalSpeech(String text) async {
+    if (text.isEmpty) {
+      await _handleNoCommand();
+      return;
+    }
+
+    final hasWakeWord = WakeWord.detected(text);
+    String command;
+
+    if (hasWakeWord) {
+      command = WakeWord.extractCommand(text).trim();
+    } else if (_expectWakeWord) {
+      // লিসা না বলে কথা বলা হয়েছে
+      await _stopListening(null);
+      await _ttsService.speak('মনে রাখবেন, আগে লিসা বলে ডাকবেন।');
+      return;
+    } else {
+      // "বলুন, শুনছি"র পর — লিসা ছাড়াই কমান্ড নেওয়া হবে
+      command = text;
+    }
+
+    if (command.isEmpty) {
+      await _handleNoCommand();
+      return;
+    }
+
+    await _executeCommand(text, command);
+  }
+
+  // ══ কমান্ড না পেলে ════════════════════════════
+  Future<void> _handleNoCommand() async {
+    // ধাপ ১: একবার "বলুন, শুনছি" বলে ৫ সেকেন্ড শোনা
+    if (!_askedAgain) {
+      _askedAgain = true;
+      await _stopListening('শুনতে পাইনি…');
+      await _ttsService.speak('বলুন, শুনছি।');
+      if (!mounted) return;
+      await _startListening(
+        seconds: _secondListenSeconds,
+        expectWakeWord: false,
+      );
+      return;
+    }
+
+    // ধাপ ২: দুইবারও কিছু নেই → মাইক বন্ধ (ইউজার ট্যাপ করলে আবার চালু)
+    _askedAgain = false;
+    await _stopListening('শুনতে পাইনি। ট্যাপ করে আবার বলুন।');
+  }
+
+  // ══ কমান্ড চালানো ═════════════════════════════
+  Future<void> _executeCommand(String originalText, String command) async {
+    if (_router == null) {
+      await _ttsService.speak('LISA এখনো প্রস্তুত হয়নি। একটু পরে বলুন।');
+      await _stopListening(null);
+      return;
+    }
+
+    _listenTimer?.cancel();
+    _listenTimer = null;
+
+    if (mounted) {
+      setState(() {
+        _commandExecuting = true;
         _isListening = false;
-        _commandExecuting = false;
+        _askedAgain = false;
+        _spokenText = originalText;
+      });
+    }
+
+    await _speechService.stopListening();
+    await _feedbackService.onProcessing();
+
+    try {
+      final result = await _router!.route(command);
+
+      await _saveToHistory(originalText, command, result.success, result.message);
+
+      if (result.success) {
+        await _feedbackService.onCommandSuccess(result.message);
+      } else {
+        await _feedbackService.onCommandFailed(result.message);
+      }
+    } catch (e) {
+      debugPrint('Route error: $e');
+      await _ttsService.speak('দুঃখিত, কিছু একটা সমস্যা হয়েছে।');
+    } finally {
+      if (mounted) setState(() => _commandExecuting = false);
+    }
+  }
+
+  // ══ শোনা বন্ধ ═════════════════════════════════
+  Future<void> _stopListening([String? screenHint]) async {
+    _listenTimer?.cancel();
+    _listenTimer = null;
+
+    if (_speechService.isListening) {
+      await _speechService.stopListening();
+    }
+    await _feedbackService.clearFeedback();
+
+    if (mounted) {
+      setState(() {
+        _isListening = false;
+        if (screenHint != null) _spokenText = screenHint;
       });
     }
   }
 
+  void _onWindowExpired() {
+    if (_commandExecuting) return;
+    _handleNoCommand();
+  }
+
+  // ══ ইতিহাস ════════════════════════════════════
   Future<void> _saveToHistory(
+    String heard,
     String command,
     bool success,
     String message,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList('command_history') ?? [];
-    final timestamp = DateTime.now().toString().split('.')[0];
-    final entry =
-        '${success ? 'success' : 'failed'}|$command|$message|$timestamp';
-    history.insert(0, entry);
-    if (history.length > 100) history.removeAt(100);
-    await prefs.setStringList('command_history', history);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final history = prefs.getStringList('command_history') ?? [];
+      final timestamp = DateTime.now().toString().split('.')[0];
+      history.insert(
+        0,
+        '${success ? 'success' : 'failed'}|$command|$message|$timestamp',
+      );
+      if (history.length > 100) history.removeAt(100);
+      await prefs.setStringList('command_history', history);
+    } catch (e) {
+      debugPrint('History save error: $e');
+    }
   }
 
   void _onPageChanged(int index) {
@@ -230,6 +369,7 @@ class _LisaMainState extends State<LisaMain> {
 
   @override
   void dispose() {
+    _listenTimer?.cancel();
     _speechService.stopListening();
     _ttsService.stop();
     super.dispose();
@@ -237,9 +377,7 @@ class _LisaMainState extends State<LisaMain> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_permissionsReady) {
-      return const SplashScreen();
-    }
+    if (!_permissionsReady) return const SplashScreen();
 
     return PopScope(
       canPop: _currentPageIndex == 0,
@@ -248,14 +386,9 @@ class _LisaMainState extends State<LisaMain> {
           setState(() => _currentPageIndex = 0);
         }
       },
-      // Fix 7: _OverlayHost সবসময় root এ থাকছে
-      // page change হলেও এটা unmount হবে না
-      // তাই _overlayKey.currentState কখনো null হবে না
       child: _OverlayHost(
         key: _overlayKey,
-        child: Scaffold(
-          body: _buildPage(),
-        ),
+        child: Scaffold(body: _buildPage()),
       ),
     );
   }
@@ -266,17 +399,15 @@ class _LisaMainState extends State<LisaMain> {
         return HomePageUpdated(
           isListening: _isListening,
           spokenText: _spokenText,
-          onMicTap: _toggleListening,
+          onMicTap: _onMicTap,
           tts: _ttsService.engine,
           speechService: _speechService,
           onPageChanged: _onPageChanged,
           showOverlay: _showOverlay,
         );
       case 1:
-        return NotesPage(onPageChanged: _onPageChanged);
-      case 2:
         return HistoryPage(onPageChanged: _onPageChanged);
-      case 3:
+      case 2:
         return SettingsPage(onPageChanged: _onPageChanged);
       default:
         return const SizedBox.shrink();
@@ -285,8 +416,9 @@ class _LisaMainState extends State<LisaMain> {
 }
 
 class _OverlayHost extends StatefulWidget {
-  final Widget child;
   const _OverlayHost({super.key, required this.child});
+
+  final Widget child;
 
   @override
   State<_OverlayHost> createState() => _OverlayHostState();
