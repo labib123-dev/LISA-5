@@ -1,16 +1,69 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-    <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.FLASHLIGHT"/>
-    <uses-permission android:name="android.permission.CALL_PHONE"/>
-    <uses-permission android:name="android.permission.VIBRATE"/>
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.SEND_SMS"/>
-    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- ══════════════ পারমিশন ══════════════ -->
 
+    <!-- মাইক — LISA-র প্রাণ। এটা ছাড়া কিছুই কাজ করবে না -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- টর্চ — torch_light কিছু ফোনে CameraManager ব্যবহার করে,
+         তাই CAMERA রাখা নিরাপদ -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+
+    <!-- ভলিউম কন্ট্রোল (AudioManager) -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- ফিডব্যাক কম্পন -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- অনলাইন STT-র জন্য Internet দরকার -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Android 13+ — নোটিফিকেশন ফিডব্যাকের জন্য -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+
+    <!-- ══════════════════════════════════════════════════════
+         Android 11 (API 30)+ প্যাকেজ ভিজিবিলিটি
+         ──────────────────────────────────────────────────────
+         এই ব্লক না থাকলে speech_to_text initialize() ফেল করে
+         এবং LISA কিছুই শুনতে পায় না।
+         ⚠️ মুছে ফেলবেন না, সরাবেন না।
+         ══════════════════════════════════════════════════════ -->
+    <queries>
+
+        <!-- মাইক / স্পিচ রিকগনিশন — সবচেয়ে জরুরি এন্ট্রি -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+
+        <!-- TTS ইঞ্জিন খোঁজা -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+
+        <!-- বাংলা কণ্ঠ ডাউনলোডের সিস্টেম স্ক্রিন
+             (first-run wizard-এর "কণ্ঠ ইনস্টল" বাটনের জন্য) -->
+        <intent>
+            <action android:name="android.speech.tts.engine.INSTALL_TTS_DATA" />
+        </intent>
+
+        <!-- ভয়েস ইনপুট সেটিংস — ইউজার বাংলা STT ইনস্টল না থাকলে
+             এখানে পাঠানো হবে -->
+        <intent>
+            <action android:name="android.settings.VOICE_INPUT_SETTINGS" />
+        </intent>
+
+        <!-- অ্যালার্ম সেট করার সিস্টেম ক্লক অ্যাপ -->
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+
+    </queries>
+
+
+    <!-- ══════════════ অ্যাপ্লিকেশন ══════════════ -->
     <application
         android:name="${applicationName}"
         android:label="LISA"
@@ -21,6 +74,7 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:theme="@style/LaunchTheme"
+            android:screenOrientation="portrait"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
@@ -30,15 +84,16 @@
                 android:resource="@style/NormalTheme" />
 
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
         </activity>
 
         <meta-data
             android:name="flutterEmbedding"
-            android:value="2"/>
+            android:value="2" />
+
     </application>
 
 </manifest>
