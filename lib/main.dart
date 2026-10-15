@@ -356,7 +356,7 @@ class _LisaMainState extends State<LisaMain> {
         0,
         '${success ? 'success' : 'failed'}|$command|$message|$timestamp',
       );
-      if (history.length > 100) history.removeAt(100);
+      if (history.length > 30) history.removeAt(30);
       await prefs.setStringList('command_history', history);
     } catch (e) {
       debugPrint('History save error: $e');
