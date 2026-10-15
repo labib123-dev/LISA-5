@@ -10,8 +10,12 @@ workflows:
       - name: Get dependencies
         script: flutter pub get
 
+      # ভুল থাকলে build শুরুর আগেই ধরা পড়বে
+      - name: Analyze code
+        script: flutter analyze --no-fatal-infos --no-fatal-warnings
+
       - name: Build Release APK
-        script: flutter build apk --release --split-per-abi --target lib/main.dart
+        script: flutter build apk --release --target lib/main.dart
 
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
