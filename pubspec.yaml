@@ -1,5 +1,6 @@
 name: lisa_app
-description: LISA - Offline Voice Assistant
+description: LISA — বাংলা ভয়েস অ্যাসিস্ট্যান্ট
+
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -13,27 +14,25 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
-  # Voice
-  flutter_tts: ^4.2.5
-  speech_to_text: ^7.4.0
+  # ─────────── ভয়েস ───────────
+  flutter_tts: ^4.2.5          # LISA-র কথা বলা
+  speech_to_text: ^7.4.0       # LISA-র শোনা
 
-  # Device control
-  torch_light: ^1.1.0
-  volume_controller: ^3.4.4
-  battery_plus: ^6.2.1
-  connectivity_plus: ^6.1.0
-  vibration: ^3.1.3
+  # ─────────── ডিভাইস কন্ট্রোল ───────────
+  torch_light: ^1.1.0          # টর্চ
+  volume_controller: ^3.4.4    # ভলিউম
+  battery_plus: ^6.2.1         # ব্যাটারি
+  vibration: ^3.1.3            # কম্পন ফিডব্যাক  [(v) থাকছে]
 
-  # Intent & Launch
-  android_intent_plus: ^6.0.0
-  url_launcher: ^6.3.0
+  # ─────────── ইন্টেন্ট ───────────
+  android_intent_plus: ^6.0.0  # অ্যালার্ম, সিস্টেম সেটিংস
 
-  # Permission & Notification
+  # ─────────── পারমিশন ও নোটিফিকেশন ───────────
   permission_handler: ^11.3.1
   flutter_local_notifications: ^18.0.1
 
-  # Storage
-  shared_preferences: ^2.3.0
+  # ─────────── স্টোরেজ ───────────
+  shared_preferences: ^2.3.0   # সেটিংস, হিস্টোরি
 
 dev_dependencies:
   flutter_test:
@@ -43,5 +42,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - lib/assets/images/
-    - lib/assets/sounds/
+    - lib/asset/image/           # ✅ ঠিক করা হলো (আগে ছিল lib/assets/images/)
