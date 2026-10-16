@@ -1,4 +1,5 @@
 // lib/core/speech_service.dart
+import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 
@@ -14,14 +15,12 @@ class SpeechService {
   bool _initialized = false;
   bool _hasError = false;
 
-  /// LISA যে ভাষায় শুনবে
+  /// LISA যে ভাষায় শুনবে (initialize() ঠিক করে)
   String _localeId = 'en_US';
 
-  /// কত সেকেন্ড শুনবে — টানা কথা না বললে এতক্ষণ পরে বন্ধ
-  static const Duration _listenFor = Duration(seconds: 8);
-
-  /// কত সেকেন্ড চুপ থাকলে "বলা শেষ" ধরে নেবে
-  static const Duration _pauseFor = Duration(seconds: 2);
+  /// ডিফল্ট সময় — main.dart/wizard চাইলে প্রতি কলে বদলাতে পারে
+  static const Duration defaultListenFor = Duration(seconds: 8);
+  static const Duration defaultPauseFor = Duration(seconds: 2);
 
   /// ── প্রস্তুত করা ──
   Future<bool> initialize() async {
@@ -33,7 +32,7 @@ class SpeechService {
     try {
       final ok = await _speech.initialize(
         onStatus: (status) {
-          debugLog('STT Status: $status');
+          debugPrint('STT Status: $status');
           // 'done' বা 'notListening' স্বাভাবিক সমাপ্তি — error নয়
           if (status == 'error') {
             _hasError = true;
@@ -41,7 +40,7 @@ class SpeechService {
           }
         },
         onError: (error) {
-          debugLog('STT Error: ${error.errorMsg}');
+          debugPrint('STT Error: ${error.errorMsg}');
           _hasError = true;
           _initialized = false;
         },
@@ -70,16 +69,16 @@ class SpeechService {
         } else {
           _localeId = 'en_US';
         }
-        debugLog('LISA STT locale: $_localeId');
+        debugPrint('LISA STT locale: $_localeId');
       } catch (e) {
-        debugLog('STT locale error: $e');
+        debugPrint('STT locale error: $e');
         _localeId = 'en_US';
       }
 
       _initialized = true;
       return true;
     } catch (e) {
-      debugLog('STT initialize exception: $e');
+      debugPrint('STT initialize exception: $e');
       _initialized = false;
       _hasError = true;
       return false;
@@ -88,18 +87,19 @@ class SpeechService {
 
   /// ── শোনা শুরু ──
   ///
-  /// ⚠️ `onResult` এখন *দুইটা* argument দেয়:
+  /// ⚠️ `onResult` দুইটা argument দেয়:
   ///     text    → STT যা লিখল
   ///     isFinal → সত্যিকারের ফলাফল কি না
+  /// এটাই hands-free বাগের সমাধান — partial-এ কমান্ড চলবে না।
   ///
-  /// এটাই hands-free বাগের সমাধান। আগে আধা-বাক্যেও কমান্ড
-  /// চালানো হচ্ছিল, তাই "লিসা" বলার সাথে সাথে লিসেনিং বন্ধ হয়ে
-  /// যেত আর আসল কমান্ডটা কখনো পৌঁছাত না।
+  /// `listenFor` = কত সেকেন্ড শুনবে, `pauseFor` = কত সেকেন্ড চুপ থাকলে শেষ।
   Future<void> startListening({
     required Function(String text, bool isFinal) onResult,
+    Duration listenFor = defaultListenFor,
+    Duration pauseFor = defaultPauseFor,
   }) async {
     if (_speech.isListening) {
-      debugLog('STT: Already listening');
+      debugPrint('STT: Already listening');
       return;
     }
 
@@ -118,8 +118,8 @@ class SpeechService {
 
         partialResults: true,
 
-        listenFor: _listenFor,
-        pauseFor: _pauseFor,
+        listenFor: listenFor,
+        pauseFor: pauseFor,
 
         // অনলাইন মডেল ব্যবহার করতে দাও — বাংলায় অনেক ভালো বোঝে।
         // (অফলাইনে জোর করলে বাংলা প্রায়ই কাজ করে না)
@@ -133,7 +133,7 @@ class SpeechService {
         },
       );
     } catch (e) {
-      debugLog('STT listen error: $e');
+      debugPrint('STT listen error: $e');
       _initialized = false;
       _hasError = true;
     }
@@ -144,7 +144,7 @@ class SpeechService {
     try {
       await _speech.stop();
     } catch (e) {
-      debugLog('STT stop error: $e');
+      debugPrint('STT stop error: $e');
     }
   }
 
@@ -153,12 +153,14 @@ class SpeechService {
     try {
       await _speech.cancel();
     } catch (e) {
-      debugLog('STT cancel error: $e');
+      debugPrint('STT cancel error: $e');
     }
   }
 
   bool get isListening => _speech.isListening;
   bool get isInitialized => _initialized;
   bool get hasError => _hasError;
+
+  /// first_run_wizard ও হোম স্ক্রিন এটা পড়ে (বাংলা আছে কি না জানতে)
   String get localeId => _localeId;
 }
