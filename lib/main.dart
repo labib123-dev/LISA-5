@@ -1,3 +1,4 @@
+// lib/main.dart
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,13 +10,15 @@ import 'core/speech_service.dart';
 import 'core/tts_service.dart';
 import 'core/wake_word.dart';
 import 'router/command_router.dart';
+import 'ui/first_run_wizard.dart';
 import 'ui/homepage_updated.dart';
 import 'ui/overly_manager.dart';
 import 'ui/pages/history_page.dart';
 import 'ui/pages/settings_page.dart';
 import 'ui/splash_screen.dart';
 
-/// পর্ব ২ — ফাইল ৩/৫
+/// LISA v1 — পেজ index:
+///   0 = Home      1 = History      2 = Settings      3 = Setup wizard
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const LisaApp());
@@ -55,6 +58,8 @@ class _LisaMainState extends State<LisaMain> {
   static const int _firstListenSeconds = 8; // ১ম ধাপ কত সেকেন্ড শুনবে
   static const int _secondListenSeconds = 5; // "বলুন, শুনছি"র পর ৫ সেকেন্ড
   static const bool requireWakeWord = true; // false করলে লিসা ছাড়াও চলবে
+
+  static const int _wizardPage = 3; // সেটআপ উইজার্ডের index
 
   // ══ State ═════════════════════════════════════
   bool _permissionsReady = false;
@@ -113,11 +118,14 @@ class _LisaMainState extends State<LisaMain> {
         showOverlay: _showOverlay,
       );
 
-      // পর্ব ২ — ফাইল ৪/৫ (first_run_wizard.dart) লেখার সময়
-      // ঠিক এখানে setup চেক যোগ হবে:
-      //   final prefs = await SharedPreferences.getInstance();
-      //   final done = prefs.getBool('setup_done') ?? false;
-      //   if (!done) → FirstRunWizard
+      // ── প্যাচ ২: প্রথমবার হলে সেটআপ উইজার্ডে পাঠাও ──
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final setupDone = prefs.getBool('setup_done') ?? false;
+        if (!setupDone) _currentPageIndex = _wizardPage;
+      } catch (e) {
+        debugPrint('Setup check failed: $e');
+      }
 
       if (mounted) setState(() => _permissionsReady = true);
     } catch (e) {
@@ -303,7 +311,12 @@ class _LisaMainState extends State<LisaMain> {
     try {
       final result = await _router!.route(command);
 
-      await _saveToHistory(originalText, command, result.success, result.message);
+      await _saveToHistory(
+        originalText,
+        command,
+        result.success,
+        result.message,
+      );
 
       if (result.success) {
         await _feedbackService.onCommandSuccess(result.message);
@@ -382,9 +395,12 @@ class _LisaMainState extends State<LisaMain> {
     return PopScope(
       canPop: _currentPageIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _currentPageIndex != 0) {
-          setState(() => _currentPageIndex = 0);
-        }
+        if (didPop) return;
+
+        // প্যাচ ৫: সেটআপ উইজার্ড চলাকালীন পিছনে চাপলে কিছুই হবে না
+        if (_currentPageIndex == _wizardPage) return;
+
+        setState(() => _currentPageIndex = 0);
       },
       child: _OverlayHost(
         key: _overlayKey,
@@ -405,10 +421,46 @@ class _LisaMainState extends State<LisaMain> {
           onPageChanged: _onPageChanged,
           showOverlay: _showOverlay,
         );
+
       case 1:
         return HistoryPage(onPageChanged: _onPageChanged);
+
       case 2:
-        return SettingsPage(onPageChanged: _onPageChanged);
+        // প্যাচ ৪: Settings-এর সব বোতাম/স্লাইডার এখন সত্যিই কাজ করবে
+        return SettingsPage(
+          onPageChanged: _onPageChanged,
+          ttsService: _ttsService,
+          onOpenWizard: () =>
+              setState(() => _currentPageIndex = _wizardPage),
+          onFactoryReset: () async {
+            try {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('setup_done', false);
+            } catch (e) {
+              debugPrint('Factory reset flag error: $e');
+            }
+            if (!mounted) return;
+            setState(() {
+              _spokenText = '';
+              _currentPageIndex = _wizardPage;
+            });
+          },
+        );
+
+      // প্যাচ ৩: সেটআপ উইজার্ড
+      case 3:
+        return FirstRunWizard(
+          ttsService: _ttsService,
+          speechService: _speechService,
+          onComplete: () {
+            if (!mounted) return;
+            setState(() {
+              _spokenText = 'মাইকে ট্যাপ করে লিসা বলে ডাকুন।';
+              _currentPageIndex = 0;
+            });
+          },
+        );
+
       default:
         return const SizedBox.shrink();
     }
