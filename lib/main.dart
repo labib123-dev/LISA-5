@@ -59,7 +59,7 @@ class _LisaMainState extends State<LisaMain> {
   static const int _secondListenSeconds = 5; // "বলুন, শুনছি"র পর ৫ সেকেন্ড
   static const bool requireWakeWord = true; // false করলে লিসা ছাড়াও চলবে
 
-  static const int _wizardPage = 3; // সেটআপ উইজার্ডের index
+  static const int _wizardPage = 3;
 
   // ══ State ═════════════════════════════════════
   bool _permissionsReady = false;
@@ -107,6 +107,7 @@ class _LisaMainState extends State<LisaMain> {
         debugPrint('Speech init failed: $e');
       }
 
+      // প্যাচ ৬: init() এখন Settings-এর vibration/notification সুইচও পড়ে
       try {
         await _feedbackService.init();
       } catch (e) {
@@ -118,7 +119,7 @@ class _LisaMainState extends State<LisaMain> {
         showOverlay: _showOverlay,
       );
 
-      // ── প্যাচ ২: প্রথমবার হলে সেটআপ উইজার্ডে পাঠাও ──
+      // প্যাচ ২: প্রথমবার হলে সেটআপ উইজার্ডে পাঠাও
       try {
         final prefs = await SharedPreferences.getInstance();
         final setupDone = prefs.getBool('setup_done') ?? false;
@@ -376,7 +377,11 @@ class _LisaMainState extends State<LisaMain> {
     }
   }
 
+  // ══ পেজ বদল ═══════════════════════════════════
   void _onPageChanged(int index) {
+    // প্যাচ ৬: Settings-এ সুইচ বদলে ফিরে এলে নতুন পছন্দ সাথে সাথে লাগু হবে
+    _feedbackService.reloadSettings();
+
     if (mounted) setState(() => _currentPageIndex = index);
   }
 
