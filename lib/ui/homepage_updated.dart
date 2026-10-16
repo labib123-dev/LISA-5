@@ -1,18 +1,32 @@
+// lib/ui/homepage_updated.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'dart:async';
-import '../core/speech_service.dart';
-import '../commands/flashlight.dart';
-import '../commands/phone_call.dart';
-import '../commands/message.dart';
-import '../commands/alarm.dart';
 
+import '../commands/help.dart';
+import '../core/speech_service.dart';
+import 'widgets/lisa_bottom_nav.dart';
+
+/// LISA v1 — হোম স্ক্রিন (পর্ব ৩ — ফাইল ১/৫)
+///
+/// ⚠️ ইচ্ছাকৃতভাবে যা নেই:
+///   • on-screen slider / brightness (v1-এ বাদ)
+///   • Quick action (কল / মেসেজ) — ওই command ফাইলগুলো ডিলিট করা
+///   • ভেতরে দ্বিতীয় STT listener (_quickCompleter) — এটাই ছিল
+///     পুরনো সবচেয়ে বড় বাগ (partial result-এ আগেই fire হতো)
+///
+/// এখন সব কমান্ড main.dart-এর একটাই লিসেনার দিয়ে চলে,
+/// আর হোম স্ক্রিন শুধু দেখায় + মাইক ট্যাপ নেয়।
 class HomePageUpdated extends StatefulWidget {
   final bool isListening;
   final String spokenText;
   final VoidCallback onMicTap;
+
+  /// HelpCommand.sayHelp() এর জন্য দরকার
   final FlutterTts tts;
+
+  /// মাইকে সমস্যা হলে ব্যানার দেখাতে ব্যবহৃত
   final SpeechService speechService;
+
   final Function(int) onPageChanged;
   final Function(Widget) showOverlay;
 
@@ -31,420 +45,392 @@ class HomePageUpdated extends StatefulWidget {
   State<HomePageUpdated> createState() => _HomePageUpdatedState();
 }
 
-class _HomePageUpdatedState extends State<HomePageUpdated> {
-  int selectedIndex = 0;
-  bool _torchOn = false;
-  bool _quickListening = false;
-  String _quickPrompt = '';
-  String _activeAction = '';
+class _HomePageUpdatedState extends State<HomePageUpdated>
+    with SingleTickerProviderStateMixin {
+  // ══ রং ══════════════════════════════════════════
+  static const Color _bg = Color(0xFF0D0000);
+  static const Color _card = Color(0xFF111133);
+  static const Color _border = Color(0xFF2A2A66);
+  static const Color _accent = Color(0xFF6F7BFF);
+  static const Color _listenRed = Color(0xFFFF4D4D);
 
-  // Completer দিয়ে STT result আসার জন্য অপেক্ষা করা হচ্ছে
-  // আগে Future.delayed(9s) ব্যবহার হতো যা পুরো UI block করত
-  // এবং result আসুক বা না আসুক 9 সেকেন্ড অপেক্ষা করত
-  Completer<String>? _quickCompleter;
+  /// উদাহরণ — শুধু দেখানোর জন্য (ট্যাপ করার দরকার নেই)
+  static const List<String> _examples = [
+    'লিসা, টর্চ জ্বালাও',
+    'লিসা, কয়টা বাজে',
+    'লিসা, ব্যাটারি কত',
+    'লিসা, ভলিউম বাড়াও',
+    'লিসা, সকাল সাতটার অ্যালার্ম দাও',
+  ];
 
-  Future<void> _listenForQuickAction({
-    required String action,
-    required String prompt,
-    required Future<void> Function(String text) onFinalResult,
-  }) async {
-    // main listener চলছে বা quick listener চলছে — skip
-    if (widget.speechService.isListening || _quickListening) return;
+  late final AnimationController _pulse;
 
-    setState(() {
-      _quickListening = true;
-      _quickPrompt = prompt;
-      _activeAction = action;
-    });
-
-    await widget.tts.speak(prompt);
-
-    // Completer তৈরি করা হচ্ছে
-    // STT result আসলে complete() call হবে
-    // timeout হলে completeError() call হবে
-    _quickCompleter = Completer<String>();
-
-    try {
-      // main speechService ই use করছি — আলাদা instance না
-      // আগে _quickSpeech আলাদা instance ছিল যা Android এ
-      // main SpeechToText এর সাথে conflict করত
-      await widget.speechService.startListening(
-        onResult: (text) {
-          // final result আসলে Completer complete করা হচ্ছে
-          if (!(_quickCompleter?.isCompleted ?? true)) {
-            _quickCompleter?.complete(text);
-          }
-        },
-      );
-
-      // Result আসার জন্য অপেক্ষা — maximum 8 সেকেন্ড
-      // Result আসলে সাথে সাথেই continue করবে, 8 সেকেন্ড অপেক্ষা করবে না
-      final result = await _quickCompleter!.future.timeout(
-        const Duration(seconds: 8),
-        onTimeout: () => '',
-      );
-
-      await widget.speechService.stopListening();
-
-      setState(() {
-        _quickListening = false;
-        _quickPrompt = '';
-        _activeAction = '';
-      });
-
-      if (result.isNotEmpty) {
-        await onFinalResult(result);
-      } else {
-        await widget.tts.speak('বুঝতে পারিনি, আবার চেষ্টা করুন।');
-      }
-    } catch (e) {
-      await widget.speechService.stopListening();
-      setState(() {
-        _quickListening = false;
-        _quickPrompt = '';
-        _activeAction = '';
-      });
-      await widget.tts.speak('কিছু একটা সমস্যা হয়েছে।');
-    } finally {
-      _quickCompleter = null;
-    }
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (widget.isListening) _pulse.repeat(reverse: true);
   }
 
-  // Back button বা page change এ quick listening বন্ধ করা
-  void _cancelQuickListening() {
-    if (_quickListening) {
-      _quickCompleter?.complete('');
-      widget.speechService.stopListening();
-      setState(() {
-        _quickListening = false;
-        _quickPrompt = '';
-        _activeAction = '';
-      });
-    }
-  }
-
-  Future<void> _handleQuickAction(String action) async {
-    if (action == 'torch') {
-      if (_torchOn) {
-        await FlashlightCommand.turnOff(widget.tts);
-        setState(() => _torchOn = false);
-      } else {
-        await FlashlightCommand.turnOn(widget.tts);
-        setState(() => _torchOn = true);
-      }
-      return;
-    }
-
-    if (action == 'call') {
-      await _listenForQuickAction(
-        action: 'call',
-        prompt: 'কাকে কল করব? নম্বর বলুন।',
-        onFinalResult: (text) async {
-          final number = RegExp(r'[\d]+').stringMatch(text) ?? '';
-          if (number.isNotEmpty) {
-            await PhoneCallCommand.callNumber(widget.tts, number);
-          } else {
-            await widget.tts.speak('নম্বর বুঝতে পারিনি।');
-          }
-        },
-      );
-      return;
-    }
-
-    if (action == 'message') {
-      await _listenForQuickAction(
-        action: 'message',
-        prompt: 'কাকে মেসেজ পাঠাব? নম্বর বলুন।',
-        onFinalResult: (text) async {
-          final number = RegExp(r'[\d]+').stringMatch(text) ?? '';
-          if (number.isNotEmpty) {
-            await MessageCommand.sendMessage(widget.tts, number, '');
-          } else {
-            await widget.tts.speak('নম্বর বুঝতে পারিনি।');
-          }
-        },
-      );
-      return;
-    }
-
-    if (action == 'alarm') {
-      await _listenForQuickAction(
-        action: 'alarm',
-        prompt: 'কয়টায় অ্যালার্ম দেব? সময় বলুন।',
-        onFinalResult: (text) async {
-          await AlarmCommand.setAlarm(widget.tts, text, widget.showOverlay);
-        },
-      );
-      return;
+  @override
+  void didUpdateWidget(covariant HomePageUpdated oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // শোনা শুরু/বন্ধের সাথে পালস অ্যানিমেশন মেলানো
+    if (widget.isListening && !_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    } else if (!widget.isListening && _pulse.isAnimating) {
+      _pulse.stop();
+      _pulse.value = 0;
     }
   }
 
   @override
   void dispose() {
-    _cancelQuickListening();
+    _pulse.dispose();
     super.dispose();
+  }
+
+  Future<void> _openHelp() async {
+    await HelpCommand.sayHelp(widget.tts, widget.showOverlay);
   }
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_quickListening,
-      onPopInvokedWithResult: (didPop, result) {
-        if (_quickListening) {
-          _cancelQuickListening();
-        }
-      },
-      child: Scaffold(
-        backgroundColor: const Color(0xFF070722),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-            child: Column(
-              children: [
-                // Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Scaffold(
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(22, 14, 22, 10),
+                child: Column(
                   children: [
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('LISA', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                        Text('Personal Assistant', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                      ],
-                    ),
-                    Container(
-                      width: 52, height: 52,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(colors: [Color(0xFF7B61FF), Color(0xFF44D7FF)]),
-                      ),
-                      child: const Center(child: Text('LISA', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11))),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                // Status text
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  child: _quickListening
-                      ? Container(
-                          key: const ValueKey('quick'),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.orange.withOpacity(0.5)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.mic, color: Colors.orange, size: 16),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  _quickPrompt,
-                                  style: const TextStyle(color: Colors.orange, fontSize: 13),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: _cancelQuickListening,
-                                child: const Icon(Icons.close, color: Colors.orange, size: 16),
-                              ),
-                            ],
-                          ),
-                        )
-                      : Text(
-                          key: const ValueKey('status'),
-                          widget.isListening
-                              ? 'শুনছি...'
-                              : 'হ্যালো! আমি LISA। সবসময় আপনার পাশে।',
-                          style: const TextStyle(color: Colors.white70, fontSize: 15),
-                          textAlign: TextAlign.center,
-                        ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Mic Button
-                GestureDetector(
-                  onTap: widget.onMicTap,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    width: 160, height: 160,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: widget.isListening ? Colors.redAccent : const Color(0xFF4B43D8),
-                        width: 2,
+                    _buildHeader(),
+                    const SizedBox(height: 18),
+                    _buildStatusLine(),
+                    const SizedBox(height: 18),
+                    _buildMic(),
+                    const SizedBox(height: 10),
+                    Text(
+                      widget.isListening ? 'বলুন…' : 'ট্যাপ করে বলুন',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 14,
                       ),
                     ),
-                    child: Center(
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 110, height: 110,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: widget.isListening
-                                ? [Colors.red, Colors.redAccent]
-                                : [const Color(0xFF6F7BFF), const Color(0xFF4DD8FF)],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: (widget.isListening ? Colors.red : const Color(0xFF6F7BFF)).withOpacity(0.5),
-                              blurRadius: widget.isListening ? 30 : 20,
-                              spreadRadius: widget.isListening ? 8 : 4,
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          widget.isListening ? Icons.mic : Icons.mic_none,
-                          color: Colors.white, size: 48,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                Text(
-                  widget.isListening ? 'বলুন...' : 'ট্যাপ করে বলুন',
-                  style: const TextStyle(color: Colors.white54, fontSize: 14),
-                ),
-
-                if (widget.spokenText.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF111133),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      widget.spokenText,
-                      style: const TextStyle(color: Colors.white70, fontSize: 14),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 20),
-
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('QUICK ACTIONS', style: TextStyle(color: Colors.white54, letterSpacing: 1, fontSize: 12)),
-                ),
-
-                const SizedBox(height: 10),
-
-                Row(
-                  children: [
-                    Expanded(child: _actionButton('📞 কল করুন', () => _handleQuickAction('call'), false, 'call')),
-                    const SizedBox(width: 12),
-                    Expanded(child: _actionButton('💬 মেসেজ', () => _handleQuickAction('message'), false, 'message')),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                Row(
-                  children: [
-                    Expanded(child: _actionButton('⏰ অ্যালার্ম', () => _handleQuickAction('alarm'), false, 'alarm')),
-                    const SizedBox(width: 12),
-                    Expanded(child: _actionButton(_torchOn ? '🔦 টর্চ বন্ধ' : '🔦 টর্চ', () => _handleQuickAction('torch'), _torchOn, 'torch')),
-                  ],
-                ),
-
-                const Spacer(),
-
-                Container(
-                  height: 68,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0D0D2F),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _navItem(0, Icons.home_outlined, 'Home'),
-                      _navItem(1, Icons.note_outlined, 'Notes'),
-                      _navItem(2, Icons.history, 'History'),
-                      _navItem(3, Icons.settings_outlined, 'Settings'),
+                    if (widget.speechService.hasError) ...[
+                      const SizedBox(height: 12),
+                      _buildMicErrorBanner(),
                     ],
-                  ),
+                    if (widget.spokenText.trim().isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      _buildHeardCard(),
+                    ],
+                    const SizedBox(height: 22),
+                    _buildExamples(),
+                    const SizedBox(height: 14),
+                    _buildHelpButton(),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+            LisaBottomNav(
+              currentIndex: 0,
+              onTap: widget.onPageChanged,
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _actionButton(String title, VoidCallback onTap, bool active, String action) {
-    final isActiveListening = _quickListening && _activeAction == action;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        height: 56,
-        decoration: BoxDecoration(
-          color: isActiveListening
-              ? Colors.orange.withOpacity(0.2)
-              : active
-                  ? const Color(0xFF6F7BFF).withOpacity(0.3)
-                  : const Color(0xFF111133),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isActiveListening
-                ? Colors.orange
-                : active
-                    ? const Color(0xFF6F7BFF)
-                    : const Color(0xFF2A2A66),
+  // ══ হেডার ══════════════════════════════════════
+  Widget _buildHeader() {
+    return Row(
+      children: [
+        Container(
+          width: 54,
+          height: 54,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              colors: [Color(0xFF6F7BFF), Color(0xFF4DD8FF)],
+            ),
+          ),
+          child: const Center(
+            child: Text(
+              'LISA',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
           ),
         ),
-        child: Center(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+        const SizedBox(width: 14),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (isActiveListening) ...[
-                const Icon(Icons.mic, color: Colors.orange, size: 14),
-                const SizedBox(width: 6),
-              ],
               Text(
-                title,
+                'LISA',
                 style: TextStyle(
-                  color: isActiveListening ? Colors.orange : active ? const Color(0xFF6F7BFF) : Colors.white,
-                  fontSize: 13,
-                  fontWeight: (isActiveListening || active) ? FontWeight.bold : FontWeight.normal,
+                  color: Colors.white,
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
                 ),
+              ),
+              Text(
+                'আপনার বাংলা সহকারী',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
               ),
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  // ══ স্টেটাস লাইন ══════════════════════════════
+  Widget _buildStatusLine() {
+    final listening = widget.isListening;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: listening ? _listenRed.withOpacity(0.12) : _card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: listening ? _listenRed.withOpacity(0.55) : _border,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            listening ? Icons.graphic_eq : Icons.mic_none,
+            color: listening ? _listenRed : _accent,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              listening
+                  ? 'লিসা শুনছে… "লিসা" বলে তারপর কমান্ড বলুন'
+                  : 'মাইকে ট্যাপ করে "লিসা" বলে ডাকুন',
+              style: TextStyle(
+                color: listening ? _listenRed : Colors.white70,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _navItem(int index, IconData icon, String label) {
-    final selected = selectedIndex == index;
-    return GestureDetector(
-      onTap: () {
-        if (_quickListening) _cancelQuickListening();
-        setState(() => selectedIndex = index);
-        widget.onPageChanged(index);
-      },
+  // ══ বড় মাইক + পালস ════════════════════════════
+  Widget _buildMic() {
+    return Center(
+      child: GestureDetector(
+        onTap: widget.onMicTap,
+        child: AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, _) {
+            final t = widget.isListening ? _pulse.value : 0.0;
+
+            return SizedBox(
+              width: 250,
+              height: 250,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // ছড়ানো রিং (শুনছে বোঝাতে)
+                  if (widget.isListening)
+                    Container(
+                      width: 186 + (52 * t),
+                      height: 186 + (52 * t),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _listenRed.withOpacity(0.14 - (0.10 * t)),
+                      ),
+                    ),
+                  // বাইরের বর্ডার রিং
+                  Container(
+                    width: 186,
+                    height: 186,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: widget.isListening
+                            ? _listenRed.withOpacity(0.7)
+                            : _border,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                  // ভেতরের গোল বাটন
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    width: 138,
+                    height: 138,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: widget.isListening
+                            ? const [Color(0xFFFF4D4D), Color(0xFFFF8A8A)]
+                            : const [Color(0xFF6F7BFF), Color(0xFF4DD8FF)],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (widget.isListening ? _listenRed : _accent)
+                              .withOpacity(0.45),
+                          blurRadius: widget.isListening ? 34 : 20,
+                          spreadRadius: widget.isListening ? 6 : 3,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      widget.isListening ? Icons.mic : Icons.mic_none,
+                      color: Colors.white,
+                      size: 54,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // ══ "লিসা শুনল" কার্ড ═══════════════════════════
+  Widget _buildHeardCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border),
+      ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: selected ? const Color(0xFF6F7BFF) : Colors.white54),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: selected ? const Color(0xFF6F7BFF) : Colors.white54, fontSize: 11)),
+          const Text(
+            'লিসা শুনল',
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 12,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            widget.spokenText,
+            style: const TextStyle(color: Colors.white, fontSize: 15),
+          ),
         ],
+      ),
+    );
+  }
+
+  // ══ মাইক সমস্যার ব্যানার ════════════════════════
+  Widget _buildMicErrorBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: _listenRed.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _listenRed.withOpacity(0.5)),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: _listenRed, size: 18),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'মাইক ঠিকভাবে চালু হয়নি। ফোনের সেটিংসে LISA-কে '
+              'মাইক্রোফোনের অনুমতি দিন, তারপর অ্যাপ আবার খুলুন।',
+              style: TextStyle(color: _listenRed, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══ উদাহরণ কমান্ড ══════════════════════════════
+  Widget _buildExamples() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'যেমন বলতে পারেন',
+          style: TextStyle(
+            color: Colors.white54,
+            fontSize: 12,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final e in _examples)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _card,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _border),
+                ),
+                child: Text(
+                  e,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ══ "কী কী পারি?" বোতাম ════════════════════════
+  Widget _buildHelpButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton.icon(
+        onPressed: _openHelp,
+        icon: const Icon(Icons.help_outline, color: _accent, size: 20),
+        label: const Text(
+          'কী কী পারি?',
+          style: TextStyle(color: _accent, fontSize: 15),
+        ),
+        style: OutlinedButton.styleFrom(
+          backgroundColor: _card,
+          side: const BorderSide(color: _border),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
       ),
     );
   }
