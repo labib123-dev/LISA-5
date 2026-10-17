@@ -19,8 +19,13 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    id("com.android.application") version "8.9.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+
+    // 🔧 ফিক্স ১: AGP 8.9.1 → 8.11.1 (Flutter-এর minimum, আর CI-টেস্টেড)
+    id("com.android.application") version "8.11.1" apply false
+
+    // 🔧 ফিক্স ২: Kotlin 2.1.0 → 2.2.20
+    //    (AGP 8.11.1-এর সাথে যেটাই Flutter CI-তে টেস্ট করা)
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 
 include(":app")
