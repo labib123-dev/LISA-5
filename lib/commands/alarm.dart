@@ -4,6 +4,15 @@ import 'package:android_intent_plus/android_intent.dart';
 
 import '../models/command_result.dart';
 
+/// অ্যালার্ম কমান্ড।
+///
+/// 🔧 বাগ ২ ফিক্স:
+///   আগে Map-এর উপর লুপ চালিয়ে `command.contains(key)` দেখা হতো।
+///   'এগারো' শব্দের ভেতরে 'এক' আছে, আর Map-এ 'এক' আগে থাকায়
+///   "এগারোটার অ্যালার্ম দাও" বললে সকাল ১টায় অ্যালার্ম সেট হতো।
+///
+///   এখন শব্দগুলো লম্বা-থেকে-ছোট ক্রমে সাজিয়ে চেক করা হয়,
+///   তাই 'এগারো' আগে মেলে এবং ১১টাই সেট হয়।
 class AlarmCommand {
   static Future<CommandResult> setAlarm(
     FlutterTts tts,
@@ -63,8 +72,29 @@ class AlarmCommand {
     }
   }
 
+  /// বাংলা সংখ্যাশব্দ → ঘণ্টা
+  static const Map<String, int> _banglaNumbers = {
+    'এক': 1,
+    'দুই': 2,
+    'তিন': 3,
+    'চার': 4,
+    'পাঁচ': 5,
+    'ছয়': 6,
+    'সাত': 7,
+    'আট': 8,
+    'নয়': 9,
+    'দশ': 10,
+    'এগারো': 11,
+    'বারো': 12,
+  };
+
+  /// লম্বা শব্দ আগে — নাহলে 'এগারো'-র ভেতরে 'এক' মিলে যায়
+  static final List<String> _banglaKeysLongestFirst =
+      _banglaNumbers.keys.toList()
+        ..sort((a, b) => b.length.compareTo(a.length));
+
   static Map<String, int>? _parseTime(String command) {
-    // ইংরেজি: "7:30" বা "7 30"
+    // ইংরেজি: "7:30"
     final colonPattern = RegExp(r'(\d{1,2}):(\d{2})');
     final colonMatch = colonPattern.firstMatch(command);
     if (colonMatch != null) {
@@ -85,19 +115,15 @@ class AlarmCommand {
       }
     }
 
-    // বাংলা শব্দ: "সাত টায়"
-    const banglaNumbers = {
-      'এক': 1, 'দুই': 2, 'তিন': 3, 'চার': 4,
-      'পাঁচ': 5, 'ছয়': 6, 'সাত': 7, 'আট': 8,
-      'নয়': 9, 'দশ': 10, 'এগারো': 11, 'বারো': 12,
-    };
-    for (final entry in banglaNumbers.entries) {
-      if (command.contains(entry.key)) {
-        return {'hour': entry.value, 'minute': 0};
+    // ── বাংলা শব্দ: "সাত টায়", "এগারোটা" ──
+    // 🔧 লম্বা-থেকে-ছোট ক্রমে চেক → 'এগারো' > 'এক'
+    for (final key in _banglaKeysLongestFirst) {
+      if (command.contains(key)) {
+        return {'hour': _banglaNumbers[key]!, 'minute': 0};
       }
     }
 
-    // শুধু ঘণ্টা: "alarm at 7"
+    // শুধু ঘণ্টা: "7 টায়"
     final hourOnly = RegExp(r'(\d{1,2})\s*(টায়|টা)');
     final hourMatch = hourOnly.firstMatch(command);
     if (hourMatch != null) {
