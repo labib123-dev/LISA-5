@@ -83,7 +83,9 @@ class WakeWord {
 
   /// যতিচিহ্ন সরিয়ে পরিষ্কার করা
   static String _clean(String s) {
-    var out = s.replaceAll(RegExp(r"[,.?!;:\-।'\"“”‘’]"), ' ');
+    // 🔧 ফিক্স: raw string-এ \' বা \" কাজ করে না (স্ট্রিং ভেঙে যায়)।
+    //    triple-quoted raw string-এ ভেতরে ' আর " দুটোই নিরাপদ।
+    var out = s.replaceAll(RegExp(r'''[,.?!;:\-।'"“”‘’]'''), ' ');
     out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
     return out;
   }
