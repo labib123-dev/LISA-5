@@ -150,8 +150,9 @@ class IntentMatcher {
       s = s.replaceAll(w, ' ');
     }
 
-    // যতিচিহ্ন (বাংলা দাঁড়ি সহ)
-    s = s.replaceAll(RegExp(r'[,.?!;:\-।\'"“”‘’]'), ' ');
+    // 🔧 ফিক্স: raw string-এ \' কাজ করে না — triple-quoted raw string
+    //    ব্যবহার করা হলো (যতিচিহ্ন, বাংলা দাঁড়ি সহ)
+    s = s.replaceAll(RegExp(r'''[,.?!;:\-।'"“”‘’]'''), ' ');
 
     s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
     return s;
