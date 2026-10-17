@@ -14,6 +14,12 @@ import '../core/tts_service.dart';
 ///
 /// ⚠️ "শুরু করুন" চাপলে সব পাস হলেই হোমে যাবে,
 ///    একটাও বাকি থাকলে warning দেখিয়ে কী কী বাকি তা বলবে।
+///
+/// 🔧 বাগ ৩ ফিক্স:
+///   আগে "পরে করব" বোতামটা Navigator.pop() করত, কিন্তু উইজার্ড
+///   কোনো route-এ push করা নয় (main.dart-এর ভেতরে সরাসরি widget)।
+///   তাই চাপলে কিছুই হতো না → ইউজার আটকে যেত।
+///   এখন onSkip callback দিয়ে main.dart হোমে ফেরায়।
 class FirstRunWizard extends StatefulWidget {
   final TtsService ttsService;
   final SpeechService speechService;
@@ -24,12 +30,16 @@ class FirstRunWizard extends StatefulWidget {
   /// true হলে Settings থেকে খোলা হয়েছে → "পরে করব" বোতাম দেখাবে
   final bool isRecheck;
 
+  /// 🔧 "পরে করব" চাপলে কল হবে (main.dart হোমে পাঠাবে)
+  final VoidCallback? onSkip;
+
   const FirstRunWizard({
     super.key,
     required this.ttsService,
     required this.speechService,
     required this.onComplete,
     this.isRecheck = false,
+    this.onSkip,
   });
 
   @override
@@ -120,11 +130,7 @@ class _FirstRunWizardState extends State<FirstRunWizard>
 
   /// সব বাধ্যতামূলক চেক পাস?
   bool get _allDone =>
-      _micPermission &&
-      _notificationOk &&
-      _ttsBengali &&
-      _ttsHeard &&
-      _micTestPassed;
+      _micPermission && _notificationOk && _ttsBengali && _ttsHeard && _micTestPassed;
 
   // ══ ধাপ ১: মাইক পারমিশন ═════════════════════════
   Future<void> _askMic() async {
@@ -132,6 +138,7 @@ class _FirstRunWizardState extends State<FirstRunWizard>
     _micPermission = result.isGranted;
     if (!mounted) return;
     setState(() {});
+
     if (!_micPermission) {
       await widget.ttsService
           .speak('মাইক্রোফোনের অনুমতি না দিলে আমি শুনতে পারব না।');
@@ -194,9 +201,11 @@ class _FirstRunWizardState extends State<FirstRunWizard>
         pauseFor: const Duration(seconds: 2),
         onResult: (text, isFinal) {
           final clean = text.trim();
+
           if (clean.isNotEmpty && mounted) {
             setState(() => _micTestText = clean);
           }
+
           if (isFinal) {
             _endMicTest(passed: clean.isNotEmpty);
           }
@@ -212,6 +221,7 @@ class _FirstRunWizardState extends State<FirstRunWizard>
     _testTimer?.cancel();
     _testTimer = null;
     widget.speechService.stopListening();
+
     if (!mounted) return;
     setState(() {
       _testing = false;
@@ -232,7 +242,7 @@ class _FirstRunWizardState extends State<FirstRunWizard>
       return;
     }
 
-    final missing = <String>[
+    final missing = [
       if (!_micPermission) 'মাইক্রোফোনের অনুমতি দেওয়া হয়নি',
       if (!_notificationOk) 'নোটিফিকেশনের অনুমতি দেওয়া হয়নি',
       if (!_ttsBengali) 'বাংলা কণ্ঠ ইনস্টল করা হয়নি',
@@ -242,7 +252,7 @@ class _FirstRunWizardState extends State<FirstRunWizard>
 
     if (!mounted) return;
 
-    await showDialog<void>(
+    await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: _card,
@@ -274,11 +284,14 @@ class _FirstRunWizardState extends State<FirstRunWizard>
           ],
         ),
         actions: [
+          // 🔧 বাগ ৩ ফিক্স: Navigator.pop() বাদ → onSkip callback
           if (widget.isRecheck)
             TextButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                Navigator.of(context).pop();
+                if (widget.onSkip != null) {
+                  widget.onSkip!();
+                }
               },
               child: const Text('পরে করব'),
             ),
@@ -333,7 +346,7 @@ class _FirstRunWizardState extends State<FirstRunWizard>
                 value: (_step + 1) / _lastStep,
                 minHeight: 8,
                 backgroundColor: Colors.white12,
-                valueColor: const AlwaysStoppedAnimation<Color>(_accent),
+                valueColor: const AlwaysStoppedAnimation(_accent),
               ),
             ),
           ),
@@ -438,8 +451,10 @@ class _FirstRunWizardState extends State<FirstRunWizard>
           _statusRow('বাংলা কণ্ঠ', _ttsBengali),
           _statusRow('নমুনা শোনা হয়েছে', _ttsHeard),
           const SizedBox(height: 12),
+
           if (!_ttsBengali)
             _bigButton(label: 'কণ্ঠ ইনস্টল করুন', onTap: _installVoice),
+
           if (_ttsBengali) ...[
             _bigButton(label: 'নমুনা শুনুন', onTap: _hearSample),
             const SizedBox(height: 10),
@@ -463,6 +478,7 @@ class _FirstRunWizardState extends State<FirstRunWizard>
               ],
             ),
           ],
+
           const SizedBox(height: 8),
           TextButton(
             onPressed: () => setState(() {
@@ -596,8 +612,9 @@ class _FirstRunWizardState extends State<FirstRunWizard>
           Expanded(
             child: _bigButton(
               label: _step == _lastStep ? 'শুরু করুন' : 'পরের ধাপ',
-              onTap:
-                  _step == _lastStep ? _finish : () => setState(() => _step++),
+              onTap: _step == _lastStep
+                  ? _finish
+                  : () => setState(() => _step++),
             ),
           ),
         ],
