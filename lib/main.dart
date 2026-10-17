@@ -70,6 +70,12 @@ class _LisaMainState extends State<LisaMain> {
   String _spokenText = ''; // যা শুনেছে / স্ক্রিনে নির্দেশনা
   int _currentPageIndex = 0;
 
+  /// 🔧 বাগ ৩ ফিক্স:
+  ///   false = প্রথমবারের সেটআপ → শেষ না করে বেরোনো যাবে না
+  ///   true  = Settings থেকে "Set up check" → "পরে করব" দেখাবে,
+  ///           আর পিছনে চাপলে হোমে ফিরবে (আগে আটকে যেত)
+  bool _wizardRecheck = false;
+
   Timer? _listenTimer;
 
   final GlobalKey<_OverlayHostState> _overlayKey =
@@ -107,7 +113,6 @@ class _LisaMainState extends State<LisaMain> {
         debugPrint('Speech init failed: $e');
       }
 
-      // প্যাচ ৬: init() এখন Settings-এর vibration/notification সুইচও পড়ে
       try {
         await _feedbackService.init();
       } catch (e) {
@@ -119,11 +124,14 @@ class _LisaMainState extends State<LisaMain> {
         showOverlay: _showOverlay,
       );
 
-      // প্যাচ ২: প্রথমবার হলে সেটআপ উইজার্ডে পাঠাও
+      // প্রথমবার হলে সেটআপ উইজার্ডে পাঠাও
       try {
         final prefs = await SharedPreferences.getInstance();
         final setupDone = prefs.getBool('setup_done') ?? false;
-        if (!setupDone) _currentPageIndex = _wizardPage;
+        if (!setupDone) {
+          _wizardRecheck = false; // 🔧 প্রথমবার = কড়া মোড
+          _currentPageIndex = _wizardPage;
+        }
       } catch (e) {
         debugPrint('Setup check failed: $e');
       }
@@ -379,10 +387,19 @@ class _LisaMainState extends State<LisaMain> {
 
   // ══ পেজ বদল ═══════════════════════════════════
   void _onPageChanged(int index) {
-    // প্যাচ ৬: Settings-এ সুইচ বদলে ফিরে এলে নতুন পছন্দ সাথে সাথে লাগু হবে
+    // Settings-এ সুইচ বদলে ফিরে এলে নতুন পছন্দ সাথে সাথে লাগু হবে
     _feedbackService.reloadSettings();
 
     if (mounted) setState(() => _currentPageIndex = index);
+  }
+
+  /// 🔧 বাগ ৩ ফিক্স — উইজার্ড বন্ধ করে হোমে ফেরা
+  void _leaveWizard() {
+    if (!mounted) return;
+    setState(() {
+      _wizardRecheck = false;
+      _currentPageIndex = 0;
+    });
   }
 
   @override
@@ -402,8 +419,15 @@ class _LisaMainState extends State<LisaMain> {
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
 
-        // প্যাচ ৫: সেটআপ উইজার্ড চলাকালীন পিছনে চাপলে কিছুই হবে না
-        if (_currentPageIndex == _wizardPage) return;
+        // 🔧 বাগ ৩ ফিক্স:
+        //   প্রথমবারের সেটআপ (recheck=false) → পিছনে চাপলে কিছুই হবে না,
+        //   সেটআপ শেষ করতেই হবে।
+        //   Settings থেকে খোলা (recheck=true) → পিছনে চাপলে হোমে ফিরবে,
+        //   আগের মতো ইউজার আটকে যাবে না।
+        if (_currentPageIndex == _wizardPage) {
+          if (_wizardRecheck) _leaveWizard();
+          return;
+        }
 
         setState(() => _currentPageIndex = 0);
       },
@@ -431,12 +455,14 @@ class _LisaMainState extends State<LisaMain> {
         return HistoryPage(onPageChanged: _onPageChanged);
 
       case 2:
-        // প্যাচ ৪: Settings-এর সব বোতাম/স্লাইডার এখন সত্যিই কাজ করবে
         return SettingsPage(
           onPageChanged: _onPageChanged,
           ttsService: _ttsService,
-          onOpenWizard: () =>
-              setState(() => _currentPageIndex = _wizardPage),
+          // 🔧 বাগ ৩ ফিক্স: Settings থেকে খুললে recheck মোড
+          onOpenWizard: () => setState(() {
+            _wizardRecheck = true;
+            _currentPageIndex = _wizardPage;
+          }),
           onFactoryReset: () async {
             try {
               final prefs = await SharedPreferences.getInstance();
@@ -447,20 +473,25 @@ class _LisaMainState extends State<LisaMain> {
             if (!mounted) return;
             setState(() {
               _spokenText = '';
+              _wizardRecheck = false; // 🔧 রিসেট = আবার কড়া মোড
               _currentPageIndex = _wizardPage;
             });
           },
         );
 
-      // প্যাচ ৩: সেটআপ উইজার্ড
       case 3:
         return FirstRunWizard(
           ttsService: _ttsService,
           speechService: _speechService,
+          // 🔧 বাগ ৩ ফিক্স: recheck মোডে "পরে করব" বোতাম দেখাবে
+          isRecheck: _wizardRecheck,
+          // 🔧 বাগ ৩ ফিক্স: "পরে করব" চাপলে সত্যিই হোমে ফিরবে
+          onSkip: _leaveWizard,
           onComplete: () {
             if (!mounted) return;
             setState(() {
               _spokenText = 'মাইকে ট্যাপ করে লিসা বলে ডাকুন।';
+              _wizardRecheck = false;
               _currentPageIndex = 0;
             });
           },
